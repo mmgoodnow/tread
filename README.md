@@ -13,12 +13,12 @@ Implemented:
 - Idempotent Overseerr request ingestion from webhook or API polling
 - Tautulli recently-added webhook/poll ingestion for request-to-Plex timing
 - Sonarr/Radarr webhook ingestion for grab/import lifecycle timestamps
+- qBittorrent HTTP polling for started/finished download events
 - Low-cardinality Prometheus counters, gauges, and histograms
 - `configure` subcommand for writing local environment files
 
 Not implemented yet:
 
-- qBittorrent polling
 - Reliable Overseerr notification/email tracking beyond best-effort webhook/event ingestion
 
 ## Run locally
@@ -37,7 +37,10 @@ cargo run -- configure \
   --overseerr-url http://overseerr.local:5055/ \
   --overseerr-api-key "$OVERSEERR_API_KEY" \
   --tautulli-url http://tautulli.local:8181/ \
-  --tautulli-api-key "$TAUTULLI_API_KEY"
+  --tautulli-api-key "$TAUTULLI_API_KEY" \
+  --qbittorrent-url http://qbittorrent.local:8080/ \
+  --qbittorrent-username "$QBITTORRENT_USERNAME" \
+  --qbittorrent-password "$QBITTORRENT_PASSWORD"
 ```
 
 Load it with your shell or Docker Compose before starting the service.
@@ -60,6 +63,8 @@ Raw payloads are stored in the `events` table for debugging. Correlation prefers
 5. season/episode when available
 
 Torrent names should only be used as a later fallback.
+
+The qBittorrent poller uses only HTTP API calls. It infers media type from category/tags (`radarr`, `sonarr`, `movies`, or `tv`) and then uses the torrent name as a fallback title because qBittorrent does not carry stable TMDB/TVDB/IMDB IDs. If that inference is too weak for your setup, keep the poller disabled until we add a stronger mapping source.
 
 ## Metrics
 

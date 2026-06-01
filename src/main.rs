@@ -4,7 +4,9 @@ use clap::{Args, Parser, Subcommand};
 use tokio::task::JoinSet;
 use tread::{
     Settings, api,
-    clients::{overseerr::OverseerrClient, tautulli::TautulliClient},
+    clients::{
+        overseerr::OverseerrClient, qbittorrent::QbittorrentClient, tautulli::TautulliClient,
+    },
     db,
 };
 
@@ -77,6 +79,13 @@ async fn serve(settings: Settings) -> anyhow::Result<()> {
             tasks.spawn(async move { poll_tautulli(client, pool, interval).await });
         }
     }
+    if settings.qbittorrent.enabled {
+        if let Some(client) = QbittorrentClient::from_settings(&settings.qbittorrent) {
+            let pool = pool.clone();
+            let interval = settings.poll_interval();
+            tasks.spawn(async move { poll_qbittorrent(client, pool, interval).await });
+        }
+    }
 
     let listener = tokio::net::TcpListener::bind(settings.bind_addr).await?;
     tracing::info!(addr = %settings.bind_addr, "listening");
@@ -106,6 +115,17 @@ async fn poll_tautulli(client: TautulliClient, pool: sqlx::SqlitePool, interval:
         match client.poll_recently_added(&pool).await {
             Ok(count) => tracing::debug!(count, "polled tautulli recently added"),
             Err(error) => tracing::warn!(?error, "tautulli poll failed"),
+        }
+    }
+}
+
+async fn poll_qbittorrent(client: QbittorrentClient, pool: sqlx::SqlitePool, interval: Duration) {
+    let mut ticker = tokio::time::interval(interval);
+    loop {
+        ticker.tick().await;
+        match client.poll_torrents(&pool).await {
+            Ok(count) => tracing::debug!(count, "polled qbittorrent torrents"),
+            Err(error) => tracing::warn!(?error, "qbittorrent poll failed"),
         }
     }
 }
