@@ -1,0 +1,22 @@
+[package]
+name = "tread"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.95"
+async-trait = "0.1.85"
+axum = { version = "0.8.1", features = ["macros"] }
+chrono = { version = "0.4.39", features = ["serde"] }
+clap = { version = "4.5.28", features = ["derive", "env"] }
+figment = { version = "0.10.19", features = ["env", "toml"] }
+prometheus = "0.13.4"
+reqwest = { version = "0.12.12", default-features = false, features = ["cookies", "json", "rustls-tls"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+sqlx = { version = "0.8.3", features = ["runtime-tokio-rustls", "sqlite", "chrono", "migrate"] }
+thiserror = "2.0.11"
+tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+url = { version = "2.5.4", features = ["serde"] }

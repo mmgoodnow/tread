@@ -1,0 +1,221 @@
+use prometheus::{
+    Encoder, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
+};
+use sqlx::{Row, SqlitePool};
+
+pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
+    let registry = Registry::new();
+
+    let request_to_plex = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_to_plex_available_seconds",
+            "Seconds from request submission to Plex availability.",
+        ),
+        &["media_type", "source"],
+    )?;
+    let request_to_download_started = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_to_download_started_seconds",
+            "Seconds from request submission to BitTorrent download start.",
+        ),
+        &["media_type", "download_client"],
+    )?;
+    let request_to_download_finished = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_to_download_finished_seconds",
+            "Seconds from request submission to BitTorrent download completion.",
+        ),
+        &["media_type", "download_client"],
+    )?;
+    let request_to_notification = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_to_overseerr_notification_seconds",
+            "Seconds from request submission to Overseerr notification or email.",
+        ),
+        &["media_type", "notification_type"],
+    )?;
+
+    let requests_total = IntCounterVec::new(
+        Opts::new("media_requests_total", "Total tracked media requests."),
+        &["media_type"],
+    )?;
+    let events_total = IntCounterVec::new(
+        Opts::new(
+            "media_request_events_total",
+            "Total lifecycle events observed.",
+        ),
+        &["source", "event_type"],
+    )?;
+    let failures_total = IntCounterVec::new(
+        Opts::new(
+            "media_request_lifecycle_failures_total",
+            "Lifecycle failures detected by the correlator.",
+        ),
+        &["stage", "reason"],
+    )?;
+    let inflight = GaugeVec::new(
+        Opts::new(
+            "media_request_lifecycle_inflight",
+            "Requests submitted but not yet completed at a lifecycle stage.",
+        ),
+        &["stage"],
+    )?;
+    let unmatched = GaugeVec::new(
+        Opts::new(
+            "media_request_lifecycle_unmatched_events",
+            "Lifecycle events without a matching media request.",
+        ),
+        &["source"],
+    )?;
+
+    registry.register(Box::new(request_to_plex.clone()))?;
+    registry.register(Box::new(request_to_download_started.clone()))?;
+    registry.register(Box::new(request_to_download_finished.clone()))?;
+    registry.register(Box::new(request_to_notification.clone()))?;
+    registry.register(Box::new(requests_total.clone()))?;
+    registry.register(Box::new(events_total.clone()))?;
+    registry.register(Box::new(failures_total.clone()))?;
+    registry.register(Box::new(inflight.clone()))?;
+    registry.register(Box::new(unmatched.clone()))?;
+
+    let rows = sqlx::query(
+        r#"
+        SELECT media_type, requested_at, download_started_at, download_finished_at,
+               plex_available_at, overseerr_notification_sent_at
+        FROM media_requests
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut awaiting_download_start = 0.0;
+    let mut awaiting_download_finish = 0.0;
+    let mut awaiting_plex = 0.0;
+    let mut awaiting_notification = 0.0;
+
+    for row in rows {
+        let media_type: String = row.get("media_type");
+        requests_total.with_label_values(&[&media_type]).inc();
+        let requested_at: String = row.get("requested_at");
+
+        observe_duration(
+            &request_to_plex,
+            &[&media_type, "tautulli"],
+            &requested_at,
+            row.get("plex_available_at"),
+        )?;
+        observe_duration(
+            &request_to_download_started,
+            &[&media_type, "qbittorrent"],
+            &requested_at,
+            row.get("download_started_at"),
+        )?;
+        observe_duration(
+            &request_to_download_finished,
+            &[&media_type, "qbittorrent"],
+            &requested_at,
+            row.get("download_finished_at"),
+        )?;
+        observe_duration(
+            &request_to_notification,
+            &[&media_type, "best_effort"],
+            &requested_at,
+            row.get("overseerr_notification_sent_at"),
+        )?;
+
+        if row
+            .get::<Option<String>, _>("download_started_at")
+            .is_none()
+        {
+            awaiting_download_start += 1.0;
+        }
+        if row
+            .get::<Option<String>, _>("download_finished_at")
+            .is_none()
+        {
+            awaiting_download_finish += 1.0;
+        }
+        if row.get::<Option<String>, _>("plex_available_at").is_none() {
+            awaiting_plex += 1.0;
+        }
+        if row
+            .get::<Option<String>, _>("overseerr_notification_sent_at")
+            .is_none()
+        {
+            awaiting_notification += 1.0;
+        }
+    }
+
+    inflight
+        .with_label_values(&["download_started"])
+        .set(awaiting_download_start);
+    inflight
+        .with_label_values(&["download_finished"])
+        .set(awaiting_download_finish);
+    inflight
+        .with_label_values(&["plex_available"])
+        .set(awaiting_plex);
+    inflight
+        .with_label_values(&["overseerr_notification"])
+        .set(awaiting_notification);
+
+    for row in sqlx::query(
+        "SELECT source, event_type, COUNT(*) AS count FROM events GROUP BY source, event_type",
+    )
+    .fetch_all(pool)
+    .await?
+    {
+        let source: String = row.get("source");
+        let event_type: String = row.get("event_type");
+        let count: i64 = row.get("count");
+        events_total
+            .with_label_values(&[&source, &event_type])
+            .inc_by(count.try_into()?);
+    }
+
+    for row in sqlx::query("SELECT source, COUNT(*) AS count FROM events WHERE media_request_id IS NULL GROUP BY source")
+        .fetch_all(pool)
+        .await?
+    {
+        let source: String = row.get("source");
+        let count: i64 = row.get("count");
+        unmatched.with_label_values(&[&source]).set(count as f64);
+    }
+
+    failures_total
+        .with_label_values(&["correlation", "unmatched_event"])
+        .inc_by(unmatched_total(pool).await?.try_into()?);
+
+    let encoder = TextEncoder::new();
+    let mut buffer = Vec::new();
+    encoder.encode(&registry.gather(), &mut buffer)?;
+    Ok(String::from_utf8(buffer)?)
+}
+
+fn observe_duration(
+    histogram: &HistogramVec,
+    labels: &[&str],
+    requested_at: &str,
+    completed_at: Option<String>,
+) -> anyhow::Result<()> {
+    let Some(completed_at) = completed_at else {
+        return Ok(());
+    };
+    let requested_at = chrono::DateTime::parse_from_rfc3339(requested_at)?;
+    let completed_at = chrono::DateTime::parse_from_rfc3339(&completed_at)?;
+    let seconds = completed_at
+        .signed_duration_since(requested_at)
+        .num_seconds();
+    if seconds >= 0 {
+        histogram.with_label_values(labels).observe(seconds as f64);
+    }
+    Ok(())
+}
+
+async fn unmatched_total(pool: &SqlitePool) -> anyhow::Result<u64> {
+    let row = sqlx::query("SELECT COUNT(*) AS count FROM events WHERE media_request_id IS NULL")
+        .fetch_one(pool)
+        .await?;
+    let count: i64 = row.get("count");
+    Ok(count.try_into()?)
+}
