@@ -46,7 +46,7 @@ pub struct QbittorrentSettings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            bind_addr: "0.0.0.0:8080".parse().expect("valid default bind addr"),
+            bind_addr: "0.0.0.0:80".parse().expect("valid default bind addr"),
             database_url: "sqlite://data/tread.db?mode=rwc".to_string(),
             poll_interval_seconds: 60,
             overseerr: OverseerrSettings::default(),

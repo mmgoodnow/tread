@@ -12,5 +12,5 @@ RUN useradd --system --uid 10001 --home /app tread \
 WORKDIR /app
 COPY --from=builder /app/target/release/tread /usr/local/bin/tread
 USER tread
-EXPOSE 8080
+EXPOSE 80
 CMD ["tread", "serve"]
