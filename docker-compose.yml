@@ -6,8 +6,8 @@ services:
     ports:
       - "80:80"
     volumes:
-      - tread-data:/app/data
+      - tread-config:/config
     restart: unless-stopped
 
 volumes:
-  tread-data:
+  tread-config:

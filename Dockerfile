@@ -7,8 +7,8 @@ RUN cargo build --release
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home /app tread \
-    && mkdir -p /app/data \
-    && chown -R tread:tread /app
+    && mkdir -p /config \
+    && chown -R tread:tread /app /config
 WORKDIR /app
 COPY --from=builder /app/target/release/tread /usr/local/bin/tread
 USER tread

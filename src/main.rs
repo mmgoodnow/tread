@@ -137,7 +137,7 @@ async fn shutdown_signal() {
 fn configure(args: ConfigureArgs) -> anyhow::Result<()> {
     let mut lines = vec![
         "TREAD_BIND_ADDR=0.0.0.0:80".to_string(),
-        "TREAD_DATABASE_URL=sqlite://data/tread.db?mode=rwc".to_string(),
+        "TREAD_DATABASE_URL=sqlite:///config/tread.db?mode=rwc".to_string(),
         "TREAD_POLL_INTERVAL_SECONDS=60".to_string(),
     ];
 

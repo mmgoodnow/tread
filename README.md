@@ -28,7 +28,7 @@ Not implemented yet:
 cargo run -- serve
 ```
 
-The default database is `sqlite://data/tread.db?mode=rwc`.
+The default database is `sqlite:///config/tread.db?mode=rwc`.
 
 Create a local env file:
 
