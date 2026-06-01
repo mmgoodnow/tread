@@ -34,6 +34,27 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         ),
         &["media_type", "notification_type"],
     )?;
+    let request_to_first_available = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_to_first_available_seconds",
+            "Seconds from request submission to the first requested item becoming available.",
+        ),
+        &["media_type", "availability_class"],
+    )?;
+    let item_to_plex = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_item_to_plex_available_seconds",
+            "Seconds from item request submission to Plex availability.",
+        ),
+        &["media_type", "availability_class", "source"],
+    )?;
+    let episode_air_to_plex = HistogramVec::new(
+        HistogramOpts::new(
+            "media_episode_air_to_plex_available_seconds",
+            "Seconds from episode air date to Plex availability for future-airing items.",
+        ),
+        &["source"],
+    )?;
 
     let requests_total = IntCounterVec::new(
         Opts::new("media_requests_total", "Total tracked media requests."),
@@ -72,17 +93,39 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
     registry.register(Box::new(request_to_download_started.clone()))?;
     registry.register(Box::new(request_to_download_finished.clone()))?;
     registry.register(Box::new(request_to_notification.clone()))?;
+    registry.register(Box::new(request_to_first_available.clone()))?;
+    registry.register(Box::new(item_to_plex.clone()))?;
+    registry.register(Box::new(episode_air_to_plex.clone()))?;
     registry.register(Box::new(requests_total.clone()))?;
     registry.register(Box::new(events_total.clone()))?;
     registry.register(Box::new(failures_total.clone()))?;
     registry.register(Box::new(inflight.clone()))?;
     registry.register(Box::new(unmatched.clone()))?;
 
+    let request_rows = sqlx::query(
+        r#"
+        SELECT media_type, COUNT(*) AS count
+        FROM media_requests
+        GROUP BY media_type
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for row in request_rows {
+        let media_type: String = row.get("media_type");
+        let count: i64 = row.get("count");
+        requests_total
+            .with_label_values(&[&media_type])
+            .inc_by(count.try_into()?);
+    }
+
     let rows = sqlx::query(
         r#"
-        SELECT media_type, requested_at, download_started_at, download_finished_at,
+        SELECT media_type, availability_class, requested_at, air_date,
+               download_started_at, download_finished_at,
                plex_available_at, overseerr_notification_sent_at
-        FROM media_requests
+        FROM media_request_items
         "#,
     )
     .fetch_all(pool)
@@ -95,15 +138,34 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
 
     for row in rows {
         let media_type: String = row.get("media_type");
-        requests_total.with_label_values(&[&media_type]).inc();
+        let availability_class: String = row.get("availability_class");
         let requested_at: String = row.get("requested_at");
+        let plex_available_at: Option<String> = row.get("plex_available_at");
 
-        observe_duration(
-            &request_to_plex,
-            &[&media_type, "tautulli"],
-            &requested_at,
-            row.get("plex_available_at"),
-        )?;
+        if availability_class == "future_airing" {
+            let air_date: Option<String> = row.get("air_date");
+            if let Some(air_date) = air_date {
+                observe_duration(
+                    &episode_air_to_plex,
+                    &["tautulli"],
+                    &air_date,
+                    plex_available_at.clone(),
+                )?;
+            }
+        } else {
+            observe_duration(
+                &request_to_plex,
+                &[&media_type, "tautulli"],
+                &requested_at,
+                plex_available_at.clone(),
+            )?;
+            observe_duration(
+                &item_to_plex,
+                &[&media_type, &availability_class, "tautulli"],
+                &requested_at,
+                plex_available_at.clone(),
+            )?;
+        }
         observe_duration(
             &request_to_download_started,
             &[&media_type, "qbittorrent"],
@@ -135,7 +197,7 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         {
             awaiting_download_finish += 1.0;
         }
-        if row.get::<Option<String>, _>("plex_available_at").is_none() {
+        if plex_available_at.is_none() {
             awaiting_plex += 1.0;
         }
         if row
@@ -144,6 +206,31 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         {
             awaiting_notification += 1.0;
         }
+    }
+
+    for row in sqlx::query(
+        r#"
+        SELECT mr.media_type, mri.availability_class, mr.requested_at,
+               MIN(mri.plex_available_at) AS first_available_at
+        FROM media_requests mr
+        JOIN media_request_items mri ON mri.media_request_id = mr.id
+        WHERE mri.plex_available_at IS NOT NULL
+          AND mri.availability_class != 'future_airing'
+        GROUP BY mr.id, mr.media_type, mri.availability_class, mr.requested_at
+        "#,
+    )
+    .fetch_all(pool)
+    .await?
+    {
+        let media_type: String = row.get("media_type");
+        let availability_class: String = row.get("availability_class");
+        let requested_at: String = row.get("requested_at");
+        observe_duration(
+            &request_to_first_available,
+            &[&media_type, &availability_class],
+            &requested_at,
+            row.get("first_available_at"),
+        )?;
     }
 
     inflight

@@ -9,7 +9,8 @@ Prometheus is intentionally not the source of truth. `tread` stores request and 
 Implemented:
 
 - Axum HTTP service with `/healthz` and `/metrics`
-- SQLite schema and migrations for `media_requests` and `events`
+- SQLite schema and migrations for `media_requests`, `media_request_items`, and `events`
+- Item-level lifecycle rows for movies, seasons, and episodes
 - Idempotent Overseerr request ingestion from webhook or API polling
 - Tautulli recently-added webhook/poll ingestion for request-to-Plex timing
 - Sonarr/Radarr webhook ingestion for grab/import lifecycle timestamps
@@ -66,11 +67,20 @@ Torrent names should only be used as a later fallback.
 
 The qBittorrent poller uses only HTTP API calls. It infers media type from category/tags (`radarr`, `sonarr`, `movies`, or `tv`) and then uses the torrent name as a fallback title because qBittorrent does not carry stable TMDB/TVDB/IMDB IDs. If that inference is too weak for your setup, keep the poller disabled until we add a stronger mapping source.
 
+## Active-airing TV
+
+TV requests are tracked as parent requests plus child `media_request_items`. Movies get one item. TV requests create season or episode items when that detail is present.
+
+For active-airing episodes, request-submitted latency is the wrong operational clock because the media did not exist yet. Mark those items as `future_airing` with an `air_date`; `tread` then records `media_episode_air_to_plex_available_seconds` from air date to Plex availability instead of counting the wait from the original request date. Existing or unknown items still contribute to request-to-Plex and item-to-Plex metrics.
+
 ## Metrics
 
 Exposed histograms:
 
 - `media_request_to_plex_available_seconds{media_type,source}`
+- `media_request_to_first_available_seconds{media_type,availability_class}`
+- `media_request_item_to_plex_available_seconds{media_type,availability_class,source}`
+- `media_episode_air_to_plex_available_seconds{source}`
 - `media_request_to_download_started_seconds{media_type,download_client}`
 - `media_request_to_download_finished_seconds{media_type,download_client}`
 - `media_request_to_overseerr_notification_seconds{media_type,notification_type}`

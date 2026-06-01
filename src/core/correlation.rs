@@ -65,6 +65,7 @@ pub fn best_match<'a>(
         .filter_map(|(media_request_id, request)| {
             score_identity(candidate, request).map(|confidence| MatchOutcome {
                 media_request_id,
+                media_request_item_id: None,
                 confidence,
             })
         })

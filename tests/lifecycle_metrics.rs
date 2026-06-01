@@ -2,7 +2,10 @@ use chrono::{TimeZone, Utc};
 use serde_json::json;
 use tread::{
     clients::webhook::generic_media_event,
-    core::model::{EventSource, IncomingRequest, MediaIdentity, MediaType},
+    core::model::{
+        AvailabilityClass, EventSource, IncomingRequest, MediaIdentity, MediaRequestItemInput,
+        MediaType,
+    },
     db::{connect, ingest_event, upsert_media_request},
     telemetry::render_metrics,
 };
@@ -27,6 +30,13 @@ async fn metrics_include_correlated_request_to_plex_duration() {
                 season_number: None,
                 episode_number: None,
             },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
             title: "Fight Club".to_string(),
             requested_by: Some("user".to_string()),
             requested_at: Utc.with_ymd_and_hms(2026, 5, 31, 20, 0, 0).unwrap(),
@@ -58,5 +68,68 @@ async fn metrics_include_correlated_request_to_plex_duration() {
     ));
     assert!(metrics.contains(
         "media_request_to_plex_available_seconds_sum{media_type=\"movie\",source=\"tautulli\"} 300"
+    ));
+}
+
+#[tokio::test]
+async fn future_airing_items_use_air_date_latency() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(2001),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(123),
+                tvdb_id: Some(456),
+                imdb_id: None,
+                title: Some("Weekly Show".to_string()),
+                year: Some(2026),
+                season_number: Some(3),
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(3),
+                episode_number: Some(1),
+                title: Some("Premiere".to_string()),
+                air_date: Some(Utc.with_ymd_and_hms(2026, 6, 7, 20, 0, 0).unwrap()),
+                availability_class: AvailabilityClass::FutureAiring,
+            }],
+            title: "Weekly Show".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 5, 31, 20, 0, 0).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    let event = generic_media_event(
+        EventSource::Tautulli,
+        "recently_added",
+        json!({
+            "event_type": "recently_added",
+            "external_id": "plex-rating-key-2",
+            "media_type": "series",
+            "tmdb_id": 123,
+            "tvdb_id": 456,
+            "title": "Weekly Show",
+            "year": 2026,
+            "season_number": 3,
+            "episode_number": 1,
+            "observed_at": "2026-06-07T21:00:00Z"
+        }),
+    );
+    ingest_event(&pool, event).await.expect("event ingest");
+
+    let metrics = render_metrics(&pool).await.expect("metrics render");
+    assert!(
+        metrics
+            .contains("media_episode_air_to_plex_available_seconds_sum{source=\"tautulli\"} 3600")
+    );
+    assert!(!metrics.contains(
+        "media_request_to_plex_available_seconds_sum{media_type=\"series\",source=\"tautulli\"} 608400"
     ));
 }

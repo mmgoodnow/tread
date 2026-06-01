@@ -69,9 +69,37 @@ pub struct MediaIdentity {
 pub struct IncomingRequest {
     pub overseerr_request_id: Option<i64>,
     pub identity: MediaIdentity,
+    pub items: Vec<MediaRequestItemInput>,
     pub title: String,
     pub requested_by: Option<String>,
     pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaRequestItemInput {
+    pub season_number: Option<i64>,
+    pub episode_number: Option<i64>,
+    pub title: Option<String>,
+    pub air_date: Option<DateTime<Utc>>,
+    pub availability_class: AvailabilityClass,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AvailabilityClass {
+    Existing,
+    FutureAiring,
+    Unknown,
+}
+
+impl AvailabilityClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Existing => "existing",
+            Self::FutureAiring => "future_airing",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,5 +115,6 @@ pub struct EventIngest {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatchOutcome {
     pub media_request_id: i64,
+    pub media_request_item_id: Option<i64>,
     pub confidence: f64,
 }

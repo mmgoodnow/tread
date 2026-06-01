@@ -4,7 +4,10 @@ use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 
 use crate::core::{
     correlation,
-    model::{EventIngest, IncomingRequest, MatchOutcome, MediaIdentity, MediaType},
+    model::{
+        AvailabilityClass, EventIngest, IncomingRequest, MatchOutcome, MediaIdentity,
+        MediaRequestItemInput, MediaType,
+    },
 };
 
 pub async fn connect(database_url: &str) -> anyhow::Result<SqlitePool> {
@@ -49,17 +52,79 @@ pub async fn upsert_media_request(
     .bind(media_type)
     .bind(request.identity.tmdb_id)
     .bind(request.identity.tvdb_id)
-    .bind(request.identity.imdb_id)
-    .bind(request.title)
+    .bind(request.identity.imdb_id.clone())
+    .bind(request.title.clone())
     .bind(request.identity.year)
     .bind(request.identity.season_number)
     .bind(request.identity.episode_number)
-    .bind(request.requested_by)
+    .bind(request.requested_by.clone())
     .bind(requested_at)
     .fetch_one(pool)
     .await?;
 
-    Ok(row.get("id"))
+    let media_request_id = row.get("id");
+    upsert_request_items(pool, media_request_id, &request).await?;
+
+    Ok(media_request_id)
+}
+
+async fn upsert_request_items(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    request: &IncomingRequest,
+) -> anyhow::Result<()> {
+    let items = if request.items.is_empty() {
+        vec![MediaRequestItemInput {
+            season_number: request.identity.season_number,
+            episode_number: request.identity.episode_number,
+            title: Some(request.title.clone()),
+            air_date: None,
+            availability_class: if request.identity.media_type == MediaType::Movie {
+                AvailabilityClass::Existing
+            } else {
+                AvailabilityClass::Unknown
+            },
+        }]
+    } else {
+        request.items.clone()
+    };
+
+    for item in items {
+        sqlx::query(
+            r#"
+            INSERT INTO media_request_items (
+                media_request_id, media_type, season_number, episode_number, title, air_date,
+                requested_at, availability_class, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ON CONFLICT(
+                media_request_id,
+                COALESCE(season_number, -1),
+                COALESCE(episode_number, -1)
+            ) DO UPDATE SET
+                title = COALESCE(excluded.title, media_request_items.title),
+                air_date = COALESCE(excluded.air_date, media_request_items.air_date),
+                availability_class = CASE
+                    WHEN media_request_items.availability_class = 'unknown'
+                    THEN excluded.availability_class
+                    ELSE media_request_items.availability_class
+                END,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            "#,
+        )
+        .bind(media_request_id)
+        .bind(request.identity.media_type.as_str())
+        .bind(item.season_number)
+        .bind(item.episode_number)
+        .bind(item.title)
+        .bind(item.air_date.map(|date| date.to_rfc3339()))
+        .bind(request.requested_at.to_rfc3339())
+        .bind(item.availability_class.as_str())
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
 }
 
 pub async fn ingest_event(
@@ -72,8 +137,7 @@ pub async fn ingest_event(
     };
 
     if let Some(outcome) = match_outcome {
-        apply_lifecycle_timestamp(pool, outcome.media_request_id, &event, outcome.confidence)
-            .await?;
+        apply_lifecycle_timestamp(pool, outcome, &event).await?;
     }
 
     let payload = serde_json::to_string(&event.payload_json)?;
@@ -81,10 +145,14 @@ pub async fn ingest_event(
 
     sqlx::query(
         r#"
-        INSERT INTO events (source, event_type, media_request_id, external_id, payload_json, observed_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO events (
+            source, event_type, media_request_id, media_request_item_id,
+            external_id, payload_json, observed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source, event_type, external_id) DO UPDATE SET
             media_request_id = COALESCE(excluded.media_request_id, events.media_request_id),
+            media_request_item_id = COALESCE(excluded.media_request_item_id, events.media_request_item_id),
             payload_json = excluded.payload_json,
             observed_at = excluded.observed_at
         "#,
@@ -92,6 +160,7 @@ pub async fn ingest_event(
     .bind(event.source.as_str())
     .bind(&event.event_type)
     .bind(match_outcome.map(|outcome| outcome.media_request_id))
+    .bind(match_outcome.and_then(|outcome| outcome.media_request_item_id))
     .bind(&event.external_id)
     .bind(payload)
     .bind(observed_at)
@@ -103,21 +172,32 @@ pub async fn ingest_event(
 
 async fn apply_lifecycle_timestamp(
     pool: &SqlitePool,
-    media_request_id: i64,
+    outcome: MatchOutcome,
     event: &EventIngest,
-    confidence: f64,
 ) -> anyhow::Result<()> {
     let observed_at = event.observed_at.to_rfc3339();
     let stage = lifecycle_column(event.source.as_str(), &event.event_type);
 
     if let Some(column) = stage {
+        if let Some(media_request_item_id) = outcome.media_request_item_id {
+            let sql = format!(
+                "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+            );
+            sqlx::query(&sql)
+                .bind(&observed_at)
+                .bind(outcome.confidence)
+                .bind(media_request_item_id)
+                .execute(pool)
+                .await?;
+        }
+
         let sql = format!(
             "UPDATE media_requests SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
         );
         sqlx::query(&sql)
             .bind(observed_at)
-            .bind(confidence)
-            .bind(media_request_id)
+            .bind(outcome.confidence)
+            .bind(outcome.media_request_id)
             .execute(pool)
             .await?;
     }
@@ -169,8 +249,11 @@ pub async fn find_match(
             .fetch_optional(pool)
             .await?;
         if let Some(row) = row {
+            let media_request_id = row.get("id");
             return Ok(Some(MatchOutcome {
-                media_request_id: row.get("id"),
+                media_request_id,
+                media_request_item_id: find_item_for_request(pool, media_request_id, identity)
+                    .await?,
                 confidence: 0.9,
             }));
         }
@@ -203,10 +286,15 @@ pub async fn find_match(
             })
             .collect::<Vec<_>>();
 
-        return Ok(correlation::best_match(
+        let mut outcome = correlation::best_match(
             identity,
             candidates.iter().map(|(id, request)| (*id, request)),
-        ));
+        );
+        if let Some(outcome) = &mut outcome {
+            outcome.media_request_item_id =
+                find_item_for_request(pool, outcome.media_request_id, identity).await?;
+        }
+        return Ok(outcome);
     }
 
     Ok(None)
@@ -231,10 +319,82 @@ async fn find_by_id(
         .fetch_optional(pool)
         .await?;
 
-    Ok(row.map(|row| MatchOutcome {
-        media_request_id: row.get("id"),
-        confidence,
-    }))
+    if let Some(row) = row {
+        let media_request_id = row.get("id");
+        return Ok(Some(MatchOutcome {
+            media_request_id,
+            media_request_item_id: find_item_for_request(pool, media_request_id, identity).await?,
+            confidence,
+        }));
+    }
+
+    Ok(None)
+}
+
+async fn find_item_for_request(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    identity: &MediaIdentity,
+) -> anyhow::Result<Option<i64>> {
+    if let Some(episode_number) = identity.episode_number {
+        let row = sqlx::query(
+            r#"
+            SELECT id FROM media_request_items
+            WHERE media_request_id = ?
+              AND (season_number = ? OR season_number IS NULL)
+              AND episode_number = ?
+            ORDER BY season_number IS NULL, id
+            LIMIT 1
+            "#,
+        )
+        .bind(media_request_id)
+        .bind(identity.season_number)
+        .bind(episode_number)
+        .fetch_optional(pool)
+        .await?;
+        if let Some(row) = row {
+            return Ok(Some(row.get("id")));
+        }
+    }
+
+    if let Some(season_number) = identity.season_number {
+        let row = sqlx::query(
+            r#"
+            SELECT id FROM media_request_items
+            WHERE media_request_id = ?
+              AND season_number = ?
+              AND episode_number IS NULL
+            ORDER BY id
+            LIMIT 1
+            "#,
+        )
+        .bind(media_request_id)
+        .bind(season_number)
+        .fetch_optional(pool)
+        .await?;
+        if let Some(row) = row {
+            return Ok(Some(row.get("id")));
+        }
+    }
+
+    let row = sqlx::query(
+        r#"
+        SELECT id FROM media_request_items
+        WHERE media_request_id = ?
+        ORDER BY
+          CASE
+            WHEN season_number IS NULL AND episode_number IS NULL THEN 0
+            ELSE 1
+          END,
+          id
+        LIMIT 1
+        "#,
+    )
+    .bind(media_request_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|row| row.get("id")))
 }
 
 pub fn parse_datetime_or_now(value: Option<&Value>) -> DateTime<Utc> {

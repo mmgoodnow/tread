@@ -2,7 +2,10 @@ use chrono::Utc;
 use serde_json::Value;
 
 use crate::{
-    core::model::{EventIngest, EventSource, IncomingRequest, MediaIdentity, MediaType},
+    core::model::{
+        AvailabilityClass, EventIngest, EventSource, IncomingRequest, MediaIdentity,
+        MediaRequestItemInput, MediaType,
+    },
     db::parse_datetime_or_now,
 };
 
@@ -18,6 +21,12 @@ pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest
         .or_else(|| text_at(media?, &["title"]))
         .or_else(|| text_at(media?, &["name"]))?;
 
+    let season_number =
+        int_at(request, &["seasonNumber"]).or_else(|| int_at(payload, &["season_number"]));
+    let episode_number =
+        int_at(request, &["episodeNumber"]).or_else(|| int_at(payload, &["episode_number"]));
+    let items = request_items_from_payload(request, media_type, season_number, episode_number);
+
     Some(IncomingRequest {
         overseerr_request_id: int_at(request, &["id"]).or_else(|| int_at(payload, &["request_id"])),
         identity: MediaIdentity {
@@ -27,11 +36,10 @@ pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest
             imdb_id: text_at(media?, &["imdbId"]).or_else(|| text_at(payload, &["imdb_id"])),
             title: Some(title.clone()),
             year: int_at(media?, &["year"]).or_else(|| int_at(request, &["year"])),
-            season_number: int_at(request, &["seasonNumber"])
-                .or_else(|| int_at(payload, &["season_number"])),
-            episode_number: int_at(request, &["episodeNumber"])
-                .or_else(|| int_at(payload, &["episode_number"])),
+            season_number,
+            episode_number,
         },
+        items,
         title,
         requested_by: text_at(request, &["requestedBy", "displayName"])
             .or_else(|| text_at(payload, &["requested_by"])),
@@ -42,6 +50,50 @@ pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest
                 .or_else(|| payload.get("requested_at")),
         ),
     })
+}
+
+fn request_items_from_payload(
+    request: &Value,
+    media_type: MediaType,
+    season_number: Option<i64>,
+    episode_number: Option<i64>,
+) -> Vec<MediaRequestItemInput> {
+    if media_type == MediaType::Movie {
+        return vec![MediaRequestItemInput {
+            season_number: None,
+            episode_number: None,
+            title: None,
+            air_date: None,
+            availability_class: AvailabilityClass::Existing,
+        }];
+    }
+
+    if let Some(seasons) = request.get("seasons").and_then(Value::as_array) {
+        let items = seasons
+            .iter()
+            .filter_map(|season| {
+                int_at(season, &["seasonNumber"]).or_else(|| int_at(season, &["season_number"]))
+            })
+            .map(|season_number| MediaRequestItemInput {
+                season_number: Some(season_number),
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Unknown,
+            })
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            return items;
+        }
+    }
+
+    vec![MediaRequestItemInput {
+        season_number,
+        episode_number,
+        title: None,
+        air_date: None,
+        availability_class: AvailabilityClass::Unknown,
+    }]
 }
 
 pub fn generic_media_event(
