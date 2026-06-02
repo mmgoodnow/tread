@@ -19,7 +19,7 @@ impl TautulliClient {
     pub fn from_settings(settings: &TautulliSettings) -> Option<Self> {
         Some(Self {
             http: Client::new(),
-            base_url: settings.base_url.clone()?,
+            base_url: with_trailing_slash(settings.base_url.clone()?),
             api_key: settings.api_key.clone()?,
         })
     }
@@ -48,6 +48,13 @@ impl TautulliClient {
         }
         Ok(ingested)
     }
+}
+
+fn with_trailing_slash(mut url: Url) -> Url {
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+    url
 }
 
 #[derive(Debug, Deserialize)]

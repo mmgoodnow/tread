@@ -25,7 +25,7 @@ impl PrometheusRtorrentClient {
         }
         Some(Self {
             http: Client::new(),
-            base_url: settings.base_url.clone()?,
+            base_url: with_trailing_slash(settings.base_url.clone()?),
         })
     }
 
@@ -92,6 +92,13 @@ impl PrometheusRtorrentClient {
 
         Ok(ingested)
     }
+}
+
+fn with_trailing_slash(mut url: Url) -> Url {
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+    url
 }
 
 fn infer_media_type(name: &str) -> Option<MediaType> {
