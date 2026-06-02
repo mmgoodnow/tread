@@ -38,7 +38,28 @@ pub async fn upsert_media_request(
             tmdb_id = COALESCE(excluded.tmdb_id, media_requests.tmdb_id),
             tvdb_id = COALESCE(excluded.tvdb_id, media_requests.tvdb_id),
             imdb_id = COALESCE(excluded.imdb_id, media_requests.imdb_id),
-            title = excluded.title,
+            title = CASE
+                WHEN excluded.tmdb_id IS NOT NULL
+                    AND excluded.title = CAST(excluded.tmdb_id AS TEXT)
+                    AND media_requests.title IS NOT NULL
+                    AND media_requests.title != excluded.title
+                THEN media_requests.title
+                WHEN excluded.tvdb_id IS NOT NULL
+                    AND excluded.title = CAST(excluded.tvdb_id AS TEXT)
+                    AND media_requests.title IS NOT NULL
+                    AND media_requests.title != excluded.title
+                THEN media_requests.title
+                WHEN excluded.title LIKE '% tmdb:%'
+                    AND media_requests.title IS NOT NULL
+                THEN media_requests.title
+                WHEN excluded.title LIKE '% tvdb:%'
+                    AND media_requests.title IS NOT NULL
+                THEN media_requests.title
+                WHEN excluded.title LIKE '% imdb:%'
+                    AND media_requests.title IS NOT NULL
+                THEN media_requests.title
+                ELSE excluded.title
+            END,
             year = COALESCE(excluded.year, media_requests.year),
             season_number = COALESCE(excluded.season_number, media_requests.season_number),
             episode_number = COALESCE(excluded.episode_number, media_requests.episode_number),

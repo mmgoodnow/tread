@@ -155,6 +155,79 @@ async fn radarr_download_marks_download_finished() {
 }
 
 #[tokio::test]
+async fn request_upsert_does_not_overwrite_real_title_with_numeric_fallback() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(548),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(11368),
+                tvdb_id: None,
+                imdb_id: Some("tt0086979".to_string()),
+                title: Some("Blood Simple".to_string()),
+                year: Some(1985),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "Blood Simple".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 4, 44, 59).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(548),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(11368),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("11368".to_string()),
+                year: None,
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "11368".to_string(),
+            requested_by: None,
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 4, 44, 59).unwrap(),
+        },
+    )
+    .await
+    .expect("fallback request upsert");
+
+    let row =
+        sqlx::query("SELECT title, year FROM media_requests WHERE overseerr_request_id = 548")
+            .fetch_one(&pool)
+            .await
+            .expect("request row");
+    assert_eq!(row.get::<String, _>("title"), "Blood Simple");
+    assert_eq!(row.get::<Option<i64>, _>("year"), Some(1985));
+}
+
+#[tokio::test]
 async fn generic_event_reads_overseerr_request_media_identity() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
