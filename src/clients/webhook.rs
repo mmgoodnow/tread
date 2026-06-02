@@ -115,17 +115,40 @@ pub fn generic_media_event(
     default_event_type: &str,
     payload: Value,
 ) -> EventIngest {
+    let request = payload.get("request").unwrap_or(&payload);
+    let media = request
+        .get("media")
+        .or_else(|| payload.get("media"))
+        .unwrap_or(&payload);
     let media_type = text_at(&payload, &["media_type"])
         .or_else(|| text_at(&payload, &["mediaType"]))
+        .or_else(|| text_at(request, &["type"]))
+        .or_else(|| text_at(media, &["media_type"]))
+        .or_else(|| text_at(media, &["mediaType"]))
         .or_else(|| text_at(&payload, &["type"]))
         .and_then(|value| MediaType::try_from(value.as_str()).ok());
     let identity = media_type.map(|media_type| MediaIdentity {
         media_type,
-        tmdb_id: int_at(&payload, &["tmdb_id"]).or_else(|| int_at(&payload, &["tmdbId"])),
-        tvdb_id: int_at(&payload, &["tvdb_id"]).or_else(|| int_at(&payload, &["tvdbId"])),
-        imdb_id: text_at(&payload, &["imdb_id"]).or_else(|| text_at(&payload, &["imdbId"])),
-        title: text_at(&payload, &["title"]).or_else(|| text_at(&payload, &["grandparent_title"])),
-        year: int_at(&payload, &["year"]).or_else(|| int_at(&payload, &["media_year"])),
+        tmdb_id: int_at(&payload, &["tmdb_id"])
+            .or_else(|| int_at(&payload, &["tmdbId"]))
+            .or_else(|| int_at(media, &["tmdb_id"]))
+            .or_else(|| int_at(media, &["tmdbId"])),
+        tvdb_id: int_at(&payload, &["tvdb_id"])
+            .or_else(|| int_at(&payload, &["tvdbId"]))
+            .or_else(|| int_at(media, &["tvdb_id"]))
+            .or_else(|| int_at(media, &["tvdbId"])),
+        imdb_id: text_at(&payload, &["imdb_id"])
+            .or_else(|| text_at(&payload, &["imdbId"]))
+            .or_else(|| text_at(media, &["imdb_id"]))
+            .or_else(|| text_at(media, &["imdbId"])),
+        title: text_at(&payload, &["title"])
+            .or_else(|| text_at(&payload, &["grandparent_title"]))
+            .or_else(|| text_at(request, &["title"]))
+            .or_else(|| text_at(media, &["title"]))
+            .or_else(|| text_at(media, &["name"])),
+        year: int_at(&payload, &["year"])
+            .or_else(|| int_at(&payload, &["media_year"]))
+            .or_else(|| int_at(media, &["year"])),
         season_number: int_at(&payload, &["season_number"])
             .or_else(|| int_at(&payload, &["seasonNumber"])),
         episode_number: int_at(&payload, &["episode_number"])
