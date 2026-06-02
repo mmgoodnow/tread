@@ -64,6 +64,7 @@ pub async fn upsert_media_request(
 
     let media_request_id = row.get("id");
     upsert_request_items(pool, media_request_id, &request).await?;
+    reconcile_unmatched_events(pool, media_request_id, &request.identity).await?;
 
     Ok(media_request_id)
 }
@@ -175,31 +176,266 @@ async fn apply_lifecycle_timestamp(
     outcome: MatchOutcome,
     event: &EventIngest,
 ) -> anyhow::Result<()> {
-    let observed_at = event.observed_at.to_rfc3339();
     let stage = lifecycle_column(event.source.as_str(), &event.event_type);
 
     if let Some(column) = stage {
-        if let Some(media_request_item_id) = outcome.media_request_item_id {
-            let sql = format!(
-                "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
-            );
-            sqlx::query(&sql)
-                .bind(&observed_at)
-                .bind(outcome.confidence)
-                .bind(media_request_item_id)
-                .execute(pool)
-                .await?;
-        }
+        apply_lifecycle_column(
+            pool,
+            outcome.media_request_id,
+            outcome.media_request_item_id,
+            column,
+            &event.observed_at.to_rfc3339(),
+            outcome.confidence,
+        )
+        .await?;
+    }
 
+    Ok(())
+}
+
+async fn apply_lifecycle_column(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    column: &str,
+    observed_at: &str,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    if let Some(media_request_item_id) = media_request_item_id {
         let sql = format!(
-            "UPDATE media_requests SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+            "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
         );
         sqlx::query(&sql)
             .bind(observed_at)
-            .bind(outcome.confidence)
-            .bind(outcome.media_request_id)
+            .bind(confidence)
+            .bind(media_request_item_id)
             .execute(pool)
             .await?;
+    }
+
+    let sql = format!(
+        "UPDATE media_requests SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+    );
+    sqlx::query(&sql)
+        .bind(observed_at)
+        .bind(confidence)
+        .bind(media_request_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+async fn reconcile_unmatched_events(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    identity: &MediaIdentity,
+) -> anyhow::Result<()> {
+    let media_request_item_id = find_item_for_request(pool, media_request_id, identity).await?;
+
+    if let Some(tmdb_id) = identity.tmdb_id {
+        reconcile_unmatched_integer_events(
+            pool,
+            media_request_id,
+            media_request_item_id,
+            &[
+                "tmdbId",
+                "tmdb_id",
+                "movie.tmdbId",
+                "series.tmdbId",
+                "media.tmdbId",
+            ],
+            tmdb_id,
+            1.0,
+        )
+        .await?;
+    }
+
+    if let Some(tvdb_id) = identity.tvdb_id {
+        reconcile_unmatched_integer_events(
+            pool,
+            media_request_id,
+            media_request_item_id,
+            &[
+                "tvdbId",
+                "tvdb_id",
+                "movie.tvdbId",
+                "series.tvdbId",
+                "media.tvdbId",
+            ],
+            tvdb_id,
+            0.95,
+        )
+        .await?;
+    }
+
+    if let Some(imdb_id) = &identity.imdb_id {
+        reconcile_unmatched_text_events(
+            pool,
+            media_request_id,
+            media_request_item_id,
+            &[
+                "imdbId",
+                "imdb_id",
+                "movie.imdbId",
+                "series.imdbId",
+                "media.imdbId",
+            ],
+            imdb_id,
+            0.9,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn reconcile_unmatched_integer_events(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    json_paths: &[&str],
+    value: i64,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    for path in json_paths {
+        reconcile_unmatched_events_by_integer_json_value(
+            pool,
+            media_request_id,
+            media_request_item_id,
+            path,
+            value,
+            confidence,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn reconcile_unmatched_text_events(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    json_paths: &[&str],
+    value: &str,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    for path in json_paths {
+        reconcile_unmatched_events_by_text_json_value(
+            pool,
+            media_request_id,
+            media_request_item_id,
+            path,
+            value,
+            confidence,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn reconcile_unmatched_events_by_integer_json_value(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    json_path: &str,
+    value: i64,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    let path = format!("$.{json_path}");
+    let rows = sqlx::query(
+        r#"
+        SELECT id, source, event_type, observed_at
+        FROM events
+        WHERE media_request_id IS NULL
+          AND json_extract(payload_json, ?) = ?
+        "#,
+    )
+    .bind(&path)
+    .bind(value)
+    .fetch_all(pool)
+    .await?;
+
+    reconcile_unmatched_event_rows(
+        pool,
+        media_request_id,
+        media_request_item_id,
+        confidence,
+        rows,
+    )
+    .await
+}
+
+async fn reconcile_unmatched_events_by_text_json_value(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    json_path: &str,
+    value: &str,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    let path = format!("$.{json_path}");
+    let rows = sqlx::query(
+        r#"
+        SELECT id, source, event_type, observed_at
+        FROM events
+        WHERE media_request_id IS NULL
+          AND json_extract(payload_json, ?) = ?
+        "#,
+    )
+    .bind(&path)
+    .bind(value)
+    .fetch_all(pool)
+    .await?;
+
+    reconcile_unmatched_event_rows(
+        pool,
+        media_request_id,
+        media_request_item_id,
+        confidence,
+        rows,
+    )
+    .await
+}
+
+async fn reconcile_unmatched_event_rows(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    confidence: f64,
+    rows: Vec<sqlx::sqlite::SqliteRow>,
+) -> anyhow::Result<()> {
+    for row in rows {
+        let event_id = row.get::<i64, _>("id");
+        let source = row.get::<String, _>("source");
+        let event_type = row.get::<String, _>("event_type");
+        let observed_at = row.get::<String, _>("observed_at");
+
+        if let Some(column) = lifecycle_column(&source, &event_type) {
+            apply_lifecycle_column(
+                pool,
+                media_request_id,
+                media_request_item_id,
+                column,
+                &observed_at,
+                confidence,
+            )
+            .await?;
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE events
+            SET media_request_id = ?,
+                media_request_item_id = COALESCE(media_request_item_id, ?)
+            WHERE id = ?
+            "#,
+        )
+        .bind(media_request_id)
+        .bind(media_request_item_id)
+        .bind(event_id)
+        .execute(pool)
+        .await?;
     }
 
     Ok(())
