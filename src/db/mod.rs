@@ -138,6 +138,7 @@ pub async fn ingest_event(
     };
 
     if let Some(outcome) = match_outcome {
+        update_request_identity_from_event(pool, outcome.media_request_id, &event).await?;
         apply_lifecycle_timestamp(pool, outcome, &event).await?;
     }
 
@@ -187,6 +188,54 @@ async fn apply_lifecycle_timestamp(
         )
         .await?;
     }
+
+    Ok(())
+}
+
+async fn update_request_identity_from_event(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    event: &EventIngest,
+) -> anyhow::Result<()> {
+    let Some(identity) = &event.identity else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        r#"
+        UPDATE media_requests
+        SET tmdb_id = COALESCE(tmdb_id, ?),
+            tvdb_id = COALESCE(tvdb_id, ?),
+            imdb_id = COALESCE(imdb_id, ?),
+            title = CASE
+                WHEN ? IS NULL THEN title
+                WHEN title IS NULL THEN ?
+                WHEN tmdb_id IS NOT NULL AND title = CAST(tmdb_id AS TEXT) THEN ?
+                WHEN tvdb_id IS NOT NULL AND title = CAST(tvdb_id AS TEXT) THEN ?
+                WHEN title LIKE '% tmdb:%' THEN ?
+                WHEN title LIKE '% tvdb:%' THEN ?
+                WHEN title LIKE '% imdb:%' THEN ?
+                ELSE title
+            END,
+            year = COALESCE(year, ?),
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?
+        "#,
+    )
+    .bind(identity.tmdb_id)
+    .bind(identity.tvdb_id)
+    .bind(identity.imdb_id.clone())
+    .bind(identity.title.clone())
+    .bind(identity.title.clone())
+    .bind(identity.title.clone())
+    .bind(identity.title.clone())
+    .bind(identity.title.clone())
+    .bind(identity.title.clone())
+    .bind(identity.title.clone())
+    .bind(identity.year)
+    .bind(media_request_id)
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
@@ -530,6 +579,38 @@ pub async fn find_match(
             identity,
             candidates.iter().map(|(id, request)| (*id, request)),
         );
+        if let Some(outcome) = &mut outcome {
+            outcome.media_request_item_id =
+                find_item_for_request(pool, outcome.media_request_id, identity).await?;
+        }
+        return Ok(outcome);
+    }
+
+    if let Some(title) = &identity.title {
+        let rows = sqlx::query(
+            "SELECT id, media_type, tmdb_id, tvdb_id, imdb_id, title, year, season_number, episode_number FROM media_requests WHERE media_type = ?",
+        )
+        .bind(identity.media_type.as_str())
+        .fetch_all(pool)
+        .await?;
+
+        let normalized_title = correlation::normalize_title(title);
+        let mut outcome = rows
+            .into_iter()
+            .filter_map(|row| {
+                let request_title = row.get::<Option<String>, _>("title")?;
+                if correlation::normalize_title(&request_title) != normalized_title {
+                    return None;
+                }
+
+                Some(MatchOutcome {
+                    media_request_id: row.get("id"),
+                    media_request_item_id: None,
+                    confidence: 0.6,
+                })
+            })
+            .max_by(|a, b| a.confidence.total_cmp(&b.confidence));
+
         if let Some(outcome) = &mut outcome {
             outcome.media_request_item_id =
                 find_item_for_request(pool, outcome.media_request_id, identity).await?;
