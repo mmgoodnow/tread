@@ -1,0 +1,189 @@
+name: Build and Push Docker Image (amd64)
+
+on:
+  push:
+  workflow_call:
+    secrets:
+      TS_OAUTH_CLIENT_ID:
+        required: true
+      TS_OAUTH_CLIENT_SECRET:
+        required: true
+      WATCHTOWER_UPDATE_URL:
+        required: true
+      WATCHTOWER_API_TOKEN:
+        required: true
+      PUSHOVER_API_KEY:
+        required: false
+      PUSHOVER_USER_KEY:
+        required: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set build metadata
+        run: |
+          echo "GIT_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "GIT_REF=$GITHUB_REF" >> "$GITHUB_ENV"
+          echo "GIT_REF_NAME=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          echo "GIT_COMMIT_MESSAGE=$(git log -1 --pretty=%s)" >> "$GITHUB_ENV"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64, by digest)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            GIT_SHA=${{ env.GIT_SHA }}
+            GIT_REF=${{ env.GIT_REF }}
+            GIT_REF_NAME=${{ env.GIT_REF_NAME }}
+            GIT_COMMIT_MESSAGE=${{ env.GIT_COMMIT_MESSAGE }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true
+          cache-from: type=registry,ref=${{ env.IMAGE }}:cache-amd64
+          cache-to: type=registry,ref=${{ env.IMAGE }}:cache-amd64,mode=max
+
+      - name: Record digest
+        run: echo "${{ steps.build.outputs.digest }}" > digest-amd64.txt
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-amd64
+          path: digest-amd64.txt
+
+  manifest:
+    needs: build-amd64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digest (amd64)
+        uses: actions/download-artifact@v4
+        with:
+          name: digest-amd64
+          path: digest-amd64
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Create and push manifest
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          amd64_digest=$(cat digest-amd64/digest-amd64.txt)
+          amd64_ref="$IMAGE@$amd64_digest"
+
+          printf '%s\n' "$TAGS" | while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            docker buildx imagetools create --tag "$tag" "$amd64_ref"
+          done
+
+  watchtower-update:
+    needs: manifest
+    runs-on: ubuntu-latest
+    env:
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_OAUTH_CLIENT_SECRET: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+      WATCHTOWER_UPDATE_URL: ${{ secrets.WATCHTOWER_UPDATE_URL }}
+      WATCHTOWER_API_TOKEN: ${{ secrets.WATCHTOWER_API_TOKEN }}
+      PUSHOVER_API_KEY: ${{ secrets.PUSHOVER_API_KEY }}
+      PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+    steps:
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+          tags: tag:ci
+
+      - name: Trigger Watchtower update
+        id: watchtower
+        run: |
+          set -euo pipefail
+          response=$(curl -fsSL -H "Authorization: Bearer $WATCHTOWER_API_TOKEN" "$WATCHTOWER_UPDATE_URL")
+          echo "response<<EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$response" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Pushover
+        if: always()
+        env:
+          REPO: ${{ github.repository }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PUSHOVER_API_KEY:-}" ] || [ -z "${PUSHOVER_USER_KEY:-}" ]; then
+            echo "Pushover secrets not set; skipping."
+            exit 0
+          fi
+
+          app_name="${REPO##*/}"
+          short_sha=$(printf '%.7s' "$GITHUB_SHA")
+          commit_message="${COMMIT_MESSAGE%%$'\n'*}"
+
+          if [ -z "$commit_message" ]; then
+            commit_message=$(
+              curl -fsSL \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/commits/$GITHUB_SHA" |
+              python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"].splitlines()[0])'
+            )
+          fi
+
+          [ -n "$commit_message" ] || commit_message="$short_sha"
+
+          title="$app_name $short_sha"
+          message="$commit_message"
+
+          curl -fsSL -X POST \
+            -d "token=$PUSHOVER_API_KEY" \
+            -d "user=$PUSHOVER_USER_KEY" \
+            --data-urlencode "title=$title" \
+            --data-urlencode "message=$message" \
+            https://api.pushover.net/1/messages.json
