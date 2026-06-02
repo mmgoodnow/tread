@@ -529,7 +529,7 @@ async fn request_upsert_reconciles_prior_unmatched_tautulli_by_normalized_title(
 }
 
 #[tokio::test]
-async fn generic_event_reads_overseerr_request_media_identity() {
+async fn overseerr_auto_approved_does_not_count_as_available_notification() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
     let pool = connect(&database_url).await.expect("db connect");
@@ -591,9 +591,88 @@ async fn generic_event_reads_overseerr_request_media_identity() {
     .await
     .expect("request row");
 
-    assert!(
+    assert_eq!(
+        row.get::<Option<String>, _>("overseerr_notification_sent_at"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn overseerr_media_available_sets_available_notification_timestamp() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(548),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(11368),
+                tvdb_id: None,
+                imdb_id: Some("tt0086979".to_string()),
+                title: Some("Blood Simple".to_string()),
+                year: Some(1985),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "Blood Simple".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 4, 44, 59).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    let event = generic_media_event(
+        EventSource::Overseerr,
+        "notification",
+        json!({
+            "notification_type": "MEDIA_AVAILABLE",
+            "request": {
+                "id": "548",
+                "type": "movie",
+                "title": "Blood Simple (1985)",
+                "createdAt": "2026-06-02T04:44:59Z",
+                "media": {
+                    "mediaType": "movie",
+                    "tmdbId": "11368",
+                    "imdbId": "tt0086979",
+                    "title": "Blood Simple (1985)"
+                }
+            },
+            "media": {
+                "mediaType": "movie",
+                "tmdbId": "11368",
+                "imdbId": "tt0086979",
+                "title": "Blood Simple (1985)"
+            },
+            "subject": "Blood Simple (1985)",
+            "message": "Movie is now available.",
+            "observed_at": "2026-06-02T04:53:49Z"
+        }),
+    );
+    ingest_event(&pool, event).await.expect("event ingest");
+
+    let row = sqlx::query(
+        "SELECT overseerr_notification_sent_at FROM media_requests WHERE overseerr_request_id = 548",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("request row");
+
+    assert_eq!(
         row.get::<Option<String>, _>("overseerr_notification_sent_at")
-            .is_some()
+            .as_deref(),
+        Some("2026-06-02T04:53:49+00:00")
     );
 }
 

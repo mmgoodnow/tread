@@ -155,10 +155,17 @@ pub fn generic_media_event(
             .or_else(|| int_at(&payload, &["episodeNumber"])),
     });
 
-    let event_type = text_at(&payload, &["event_type"])
-        .or_else(|| text_at(&payload, &["eventType"]))
-        .or_else(|| text_at(&payload, &["event"]))
-        .unwrap_or_else(|| default_event_type.to_string());
+    let event_type = match source {
+        EventSource::Overseerr => overseerr_event_type(&payload)
+            .or_else(|| text_at(&payload, &["event_type"]))
+            .or_else(|| text_at(&payload, &["eventType"]))
+            .or_else(|| text_at(&payload, &["event"]))
+            .unwrap_or_else(|| default_event_type.to_string()),
+        _ => text_at(&payload, &["event_type"])
+            .or_else(|| text_at(&payload, &["eventType"]))
+            .or_else(|| text_at(&payload, &["event"]))
+            .unwrap_or_else(|| default_event_type.to_string()),
+    };
 
     EventIngest {
         source,
@@ -171,6 +178,11 @@ pub fn generic_media_event(
         observed_at: event_observed_at(source, &event_type, &payload),
         payload_json: payload,
     }
+}
+
+fn overseerr_event_type(payload: &Value) -> Option<String> {
+    text_at(payload, &["notification_type"])
+        .map(|value| value.to_ascii_lowercase().trim().replace([' ', '-'], "_"))
 }
 
 pub fn rtorrent_event(mut payload: Value) -> EventIngest {

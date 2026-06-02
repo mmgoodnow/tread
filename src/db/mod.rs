@@ -635,7 +635,7 @@ fn lifecycle_columns(source: &str, event_type: &str) -> Vec<&'static str> {
         }
         ("torrent", "download_started") => vec!["download_started_at"],
         ("torrent", "download_finished") => vec!["download_finished_at"],
-        ("overseerr", "notification") | ("overseerr", "email_sent") => {
+        ("overseerr", "media_available") => {
             vec!["overseerr_notification_sent_at"]
         }
         _ => Vec::new(),
