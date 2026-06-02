@@ -351,7 +351,7 @@ async fn reconcile_unmatched_events_by_integer_json_value(
         SELECT id, source, event_type, observed_at
         FROM events
         WHERE media_request_id IS NULL
-          AND json_extract(payload_json, ?) = ?
+          AND CAST(json_extract(payload_json, ?) AS INTEGER) = ?
         "#,
     )
     .bind(&path)
