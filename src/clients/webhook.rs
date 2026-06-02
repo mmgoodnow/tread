@@ -11,15 +11,17 @@ use crate::{
 
 pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest> {
     let request = payload.get("request").unwrap_or(payload);
-    let media = request.get("media").or_else(|| payload.get("media"));
+    let media = request.get("media").or_else(|| payload.get("media"))?;
     let media_type = text_at(request, &["type"])
-        .or_else(|| text_at(media?, &["mediaType"]))
+        .or_else(|| text_at(media, &["mediaType"]))
         .or_else(|| text_at(payload, &["media_type"]))
         .and_then(|value| MediaType::try_from(value.as_str()).ok())?;
 
     let title = text_at(request, &["title"])
-        .or_else(|| text_at(media?, &["title"]))
-        .or_else(|| text_at(media?, &["name"]))?;
+        .or_else(|| text_at(media, &["title"]))
+        .or_else(|| text_at(media, &["name"]))
+        .or_else(|| text_at(media, &["externalServiceSlug"]))
+        .unwrap_or_else(|| fallback_title(media, media_type));
 
     let season_number =
         int_at(request, &["seasonNumber"]).or_else(|| int_at(payload, &["season_number"]));
@@ -31,11 +33,11 @@ pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest
         overseerr_request_id: int_at(request, &["id"]).or_else(|| int_at(payload, &["request_id"])),
         identity: MediaIdentity {
             media_type,
-            tmdb_id: int_at(media?, &["tmdbId"]).or_else(|| int_at(payload, &["tmdb_id"])),
-            tvdb_id: int_at(media?, &["tvdbId"]).or_else(|| int_at(payload, &["tvdb_id"])),
-            imdb_id: text_at(media?, &["imdbId"]).or_else(|| text_at(payload, &["imdb_id"])),
+            tmdb_id: int_at(media, &["tmdbId"]).or_else(|| int_at(payload, &["tmdb_id"])),
+            tvdb_id: int_at(media, &["tvdbId"]).or_else(|| int_at(payload, &["tvdb_id"])),
+            imdb_id: text_at(media, &["imdbId"]).or_else(|| text_at(payload, &["imdb_id"])),
             title: Some(title.clone()),
-            year: int_at(media?, &["year"]).or_else(|| int_at(request, &["year"])),
+            year: int_at(media, &["year"]).or_else(|| int_at(request, &["year"])),
             season_number,
             episode_number,
         },
@@ -50,6 +52,18 @@ pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest
                 .or_else(|| payload.get("requested_at")),
         ),
     })
+}
+
+fn fallback_title(media: &Value, media_type: MediaType) -> String {
+    int_at(media, &["tmdbId"])
+        .map(|id| format!("{} tmdb:{id}", media_type.as_str()))
+        .or_else(|| {
+            int_at(media, &["tvdbId"]).map(|id| format!("{} tvdb:{id}", media_type.as_str()))
+        })
+        .or_else(|| {
+            text_at(media, &["imdbId"]).map(|id| format!("{} imdb:{id}", media_type.as_str()))
+        })
+        .unwrap_or_else(|| media_type.as_str().to_string())
 }
 
 fn request_items_from_payload(
@@ -198,4 +212,38 @@ fn int_at(value: &Value, path: &[&str]) -> Option<i64> {
         .as_i64()
         .or_else(|| cursor.as_u64().and_then(|n| i64::try_from(n).ok()))
         .or_else(|| cursor.as_str()?.parse().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::overseerr_request_from_payload;
+    use crate::core::model::MediaType;
+
+    #[test]
+    fn overseerr_request_accepts_embedded_media_without_title() {
+        let request = overseerr_request_from_payload(&json!({
+            "id": 42,
+            "type": "tv",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "requestedBy": {"displayName": "user"},
+            "seasons": [{"seasonNumber": 1}],
+            "media": {
+                "mediaType": "tv",
+                "tmdbId": 123,
+                "tvdbId": 456,
+                "imdbId": "tt123",
+                "externalServiceSlug": "example-series"
+            }
+        }))
+        .expect("request should parse");
+
+        assert_eq!(request.overseerr_request_id, Some(42));
+        assert_eq!(request.identity.media_type, MediaType::Series);
+        assert_eq!(request.identity.tmdb_id, Some(123));
+        assert_eq!(request.title, "example-series");
+        assert_eq!(request.items.len(), 1);
+        assert_eq!(request.items[0].season_number, Some(1));
+    }
 }
