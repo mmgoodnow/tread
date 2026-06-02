@@ -3,6 +3,43 @@ use prometheus::{
 };
 use sqlx::{Row, SqlitePool};
 
+const REQUEST_LIFECYCLE_BUCKETS: &[f64] = &[
+    1.0,
+    5.0,
+    10.0,
+    30.0,
+    60.0,
+    120.0,
+    300.0,
+    600.0,
+    900.0,
+    1_800.0,
+    3_600.0,
+    7_200.0,
+    14_400.0,
+    28_800.0,
+    86_400.0,
+    172_800.0,
+    604_800.0,
+    2_592_000.0,
+];
+
+const EPISODE_AIR_BUCKETS: &[f64] = &[
+    300.0,
+    600.0,
+    1_800.0,
+    3_600.0,
+    7_200.0,
+    14_400.0,
+    28_800.0,
+    86_400.0,
+    172_800.0,
+    604_800.0,
+    1_209_600.0,
+    2_592_000.0,
+    7_776_000.0,
+];
+
 pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
     let registry = Registry::new();
 
@@ -10,49 +47,56 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         HistogramOpts::new(
             "media_request_to_plex_available_seconds",
             "Seconds from request submission to Plex availability.",
-        ),
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "source"],
     )?;
     let request_to_download_started = HistogramVec::new(
         HistogramOpts::new(
             "media_request_to_download_started_seconds",
             "Seconds from request submission to BitTorrent download start.",
-        ),
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "download_client"],
     )?;
     let request_to_download_finished = HistogramVec::new(
         HistogramOpts::new(
             "media_request_to_download_finished_seconds",
             "Seconds from request submission to BitTorrent download completion.",
-        ),
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "download_client"],
     )?;
     let request_to_notification = HistogramVec::new(
         HistogramOpts::new(
             "media_request_to_overseerr_notification_seconds",
             "Seconds from request submission to Overseerr notification or email.",
-        ),
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "notification_type"],
     )?;
     let request_to_first_available = HistogramVec::new(
         HistogramOpts::new(
             "media_request_to_first_available_seconds",
             "Seconds from request submission to the first requested item becoming available.",
-        ),
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "availability_class"],
     )?;
     let item_to_plex = HistogramVec::new(
         HistogramOpts::new(
             "media_request_item_to_plex_available_seconds",
             "Seconds from item request submission to Plex availability.",
-        ),
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "availability_class", "source"],
     )?;
     let episode_air_to_plex = HistogramVec::new(
         HistogramOpts::new(
             "media_episode_air_to_plex_available_seconds",
             "Seconds from episode air date to Plex availability for future-airing items.",
-        ),
+        )
+        .buckets(EPISODE_AIR_BUCKETS.to_vec()),
         &["source"],
     )?;
 
