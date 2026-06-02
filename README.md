@@ -38,8 +38,7 @@ cargo run -- configure \
   --overseerr-url http://overseerr.local:5055/ \
   --overseerr-api-key "$OVERSEERR_API_KEY" \
   --tautulli-url http://tautulli.local:8181/ \
-  --tautulli-api-key "$TAUTULLI_API_KEY" \
-  --prometheus-url http://prometheus.local:9090/
+  --tautulli-api-key "$TAUTULLI_API_KEY"
 ```
 
 Load it with your shell or Docker Compose before starting the service.
@@ -63,7 +62,7 @@ Raw payloads are stored in the `events` table for debugging. Correlation prefers
 
 Torrent names should only be used as a later fallback.
 
-The rTorrent poller reads the existing Prometheus rtorrent-exporter scrape via the Prometheus HTTP API, then stores derived lifecycle events in SQLite. Prometheus is still not the source of truth for lifecycle history. Because the exporter does not expose stable media IDs, rTorrent matching is conservative and only uses torrent names as a fallback when the name clearly resembles a movie year or TV `SxxExx` pattern.
+The rTorrent poller reads the existing Prometheus rtorrent-exporter scrape via the Prometheus HTTP API at `http://prometheus:9090/`, then stores derived lifecycle events in SQLite. Prometheus is still not the source of truth for lifecycle history. Because the exporter does not expose stable media IDs, rTorrent matching is conservative and only uses torrent names as a fallback when the name clearly resembles a movie year or TV `SxxExx` pattern.
 
 ## Active-airing TV
 

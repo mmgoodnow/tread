@@ -38,8 +38,6 @@ struct ConfigureArgs {
     tautulli_url: Option<String>,
     #[arg(long)]
     tautulli_api_key: Option<String>,
-    #[arg(long)]
-    prometheus_url: Option<String>,
 }
 
 #[tokio::main]
@@ -156,12 +154,6 @@ fn configure(args: ConfigureArgs) -> anyhow::Result<()> {
     if let Some(value) = args.tautulli_api_key {
         lines.push(format!("TREAD_TAUTULLI__API_KEY={value}"));
     }
-    if let Some(value) = args.prometheus_url {
-        lines.push(format!("TREAD_PROMETHEUS__BASE_URL={value}"));
-        lines.push("TREAD_PROMETHEUS__ENABLED=true".to_string());
-        lines.push("TREAD_PROMETHEUS__RTORRENT_ENABLED=true".to_string());
-    }
-
     std::fs::write(&args.output, format!("{}\n", lines.join("\n")))?;
     println!("wrote {}", args.output.display());
     Ok(())

@@ -34,12 +34,26 @@ pub struct TautulliSettings {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct PrometheusSettings {
     pub base_url: Option<Url>,
     pub rtorrent_enabled: bool,
     pub enabled: bool,
+}
+
+impl Default for PrometheusSettings {
+    fn default() -> Self {
+        Self {
+            base_url: Some(
+                "http://prometheus:9090/"
+                    .parse()
+                    .expect("valid prometheus url"),
+            ),
+            rtorrent_enabled: true,
+            enabled: true,
+        }
+    }
 }
 
 impl Default for Settings {
