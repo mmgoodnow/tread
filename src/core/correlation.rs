@@ -1,7 +1,7 @@
 use crate::core::model::{MatchOutcome, MediaIdentity};
 
 pub fn normalize_title(title: &str) -> String {
-    title
+    let mut tokens = title
         .chars()
         .filter_map(|ch| {
             if ch.is_ascii_alphanumeric() {
@@ -14,8 +14,19 @@ pub fn normalize_title(title: &str) -> String {
         })
         .collect::<String>()
         .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if tokens.len() > 1 {
+        tokens.retain(|token| {
+            !(token.len() == 4
+                && token
+                    .parse::<i64>()
+                    .is_ok_and(|year| (1900..=2100).contains(&year)))
+        });
+    }
+
+    tokens.join(" ")
 }
 
 pub fn score_identity(candidate: &MediaIdentity, request: &MediaIdentity) -> Option<f64> {
@@ -108,6 +119,14 @@ mod tests {
     fn title_year_fallback_is_lower_confidence() {
         let candidate = movie("The Example: Movie", 2024);
         let request = movie("The Example Movie", 2024);
+
+        assert_eq!(score_identity(&candidate, &request), Some(0.7));
+    }
+
+    #[test]
+    fn parenthetical_year_does_not_block_title_year_match() {
+        let candidate = movie("The Limey", 1999);
+        let request = movie("The Limey (1999)", 1999);
 
         assert_eq!(score_identity(&candidate, &request), Some(0.7));
     }
