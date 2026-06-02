@@ -269,7 +269,8 @@ async fn metrics_include_correlated_request_to_plex_duration() {
             "imdb_id": "tt0137523",
             "title": "Fight Club",
             "year": 1999,
-            "observed_at": "2026-05-31T20:05:00Z"
+            "added_at": 1780257900,
+            "observed_at": "2026-05-31T20:10:00Z"
         }),
     );
     ingest_event(&pool, event).await.expect("event ingest");

@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 
 use crate::{
@@ -155,20 +155,20 @@ pub fn generic_media_event(
             .or_else(|| int_at(&payload, &["episodeNumber"])),
     });
 
+    let event_type = text_at(&payload, &["event_type"])
+        .or_else(|| text_at(&payload, &["eventType"]))
+        .or_else(|| text_at(&payload, &["event"]))
+        .unwrap_or_else(|| default_event_type.to_string());
+
     EventIngest {
         source,
-        event_type: text_at(&payload, &["event_type"])
-            .or_else(|| text_at(&payload, &["eventType"]))
-            .or_else(|| text_at(&payload, &["event"]))
-            .unwrap_or_else(|| default_event_type.to_string()),
+        event_type: event_type.clone(),
         external_id: text_at(&payload, &["external_id"])
             .or_else(|| text_at(&payload, &["rating_key"]))
             .or_else(|| text_at(&payload, &["downloadId"]))
             .or_else(|| int_at(&payload, &["id"]).map(|id| id.to_string())),
         identity,
-        observed_at: parse_datetime_or_now(
-            payload.get("observed_at").or_else(|| payload.get("date")),
-        ),
+        observed_at: event_observed_at(source, &event_type, &payload),
         payload_json: payload,
     }
 }
@@ -235,6 +235,55 @@ fn int_at(value: &Value, path: &[&str]) -> Option<i64> {
         .as_i64()
         .or_else(|| cursor.as_u64().and_then(|n| i64::try_from(n).ok()))
         .or_else(|| cursor.as_str()?.parse().ok())
+}
+
+fn event_observed_at(
+    source: EventSource,
+    event_type: &str,
+    payload: &Value,
+) -> chrono::DateTime<Utc> {
+    let normalized = event_type.to_ascii_lowercase();
+    let availability_event = matches!(source, EventSource::Plex | EventSource::Tautulli)
+        && matches!(normalized.as_str(), "recently_added" | "plex_available");
+
+    if availability_event {
+        if let Some(value) = payload
+            .get("added_at")
+            .or_else(|| payload.get("date_added"))
+            .or_else(|| payload.get("addedAt"))
+            .and_then(parse_datetime_value)
+        {
+            return value;
+        }
+    }
+
+    parse_datetime_or_now(payload.get("observed_at").or_else(|| payload.get("date")))
+}
+
+fn parse_datetime_value(value: &Value) -> Option<chrono::DateTime<Utc>> {
+    if let Some(raw) = value.as_str() {
+        return DateTime::parse_from_rfc3339(raw)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+            .or_else(|| raw.parse::<i64>().ok().and_then(unix_timestamp));
+    }
+
+    value.as_i64().and_then(unix_timestamp).or_else(|| {
+        value
+            .as_u64()
+            .and_then(|timestamp| i64::try_from(timestamp).ok())
+            .and_then(unix_timestamp)
+    })
+}
+
+fn unix_timestamp(timestamp: i64) -> Option<chrono::DateTime<Utc>> {
+    let seconds = if timestamp > 1_000_000_000_000 {
+        timestamp / 1_000
+    } else {
+        timestamp
+    };
+
+    Utc.timestamp_opt(seconds, 0).single()
 }
 
 #[cfg(test)]
