@@ -228,6 +228,78 @@ async fn request_upsert_does_not_overwrite_real_title_with_numeric_fallback() {
 }
 
 #[tokio::test]
+async fn title_only_plex_match_updates_generic_movie_item() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(548),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(11368),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("Blood Simple".to_string()),
+                year: Some(1985),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "Blood Simple".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 4, 44, 59).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    let event = generic_media_event(
+        EventSource::Tautulli,
+        "recently_added",
+        json!({
+            "event_type": "recently_added",
+            "external_id": "plex-rating-key-3",
+            "media_type": "movie",
+            "title": "Blood Simple",
+            "year": 1984,
+            "added_at": 1780376028,
+            "observed_at": "2026-06-02T05:13:42Z"
+        }),
+    );
+    ingest_event(&pool, event).await.expect("event ingest");
+
+    let row = sqlx::query(
+        r#"
+        SELECT mri.plex_available_at
+        FROM media_request_items mri
+        JOIN media_requests mr ON mr.id = mri.media_request_id
+        WHERE mr.overseerr_request_id = 548
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("item row");
+    assert_eq!(
+        row.get::<Option<String>, _>("plex_available_at").as_deref(),
+        Some("2026-06-02T04:53:48+00:00")
+    );
+
+    let metrics = render_metrics(&pool).await.expect("metrics render");
+    assert!(metrics.contains(
+        "media_request_to_plex_available_seconds_sum{media_type=\"movie\",source=\"tautulli\"} 529"
+    ));
+}
+
+#[tokio::test]
 async fn generic_event_reads_overseerr_request_media_identity() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());

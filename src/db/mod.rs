@@ -269,16 +269,29 @@ async fn apply_lifecycle_column(
     observed_at: &str,
     confidence: f64,
 ) -> anyhow::Result<()> {
-    if let Some(media_request_item_id) = media_request_item_id {
-        let sql = format!(
-            "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
-        );
-        sqlx::query(&sql)
-            .bind(observed_at)
-            .bind(confidence)
-            .bind(media_request_item_id)
-            .execute(pool)
-            .await?;
+    match media_request_item_id {
+        Some(media_request_item_id) => {
+            let sql = format!(
+                "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+            );
+            sqlx::query(&sql)
+                .bind(observed_at)
+                .bind(confidence)
+                .bind(media_request_item_id)
+                .execute(pool)
+                .await?;
+        }
+        None => {
+            let sql = format!(
+                "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE media_request_id = ? AND season_number IS NULL AND episode_number IS NULL"
+            );
+            sqlx::query(&sql)
+                .bind(observed_at)
+                .bind(confidence)
+                .bind(media_request_id)
+                .execute(pool)
+                .await?;
+        }
     }
 
     let sql = format!(
@@ -603,8 +616,8 @@ pub async fn find_match(
         if let Some(outcome) = &mut outcome {
             outcome.media_request_item_id =
                 find_item_for_request(pool, outcome.media_request_id, identity).await?;
+            return Ok(Some(*outcome));
         }
-        return Ok(outcome);
     }
 
     if let Some(title) = &identity.title {
