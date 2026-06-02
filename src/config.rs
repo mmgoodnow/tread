@@ -15,7 +15,7 @@ pub struct Settings {
     pub poll_interval_seconds: u64,
     pub overseerr: OverseerrSettings,
     pub tautulli: TautulliSettings,
-    pub qbittorrent: QbittorrentSettings,
+    pub prometheus: PrometheusSettings,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -36,10 +36,9 @@ pub struct TautulliSettings {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
-pub struct QbittorrentSettings {
+pub struct PrometheusSettings {
     pub base_url: Option<Url>,
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub rtorrent_enabled: bool,
     pub enabled: bool,
 }
 
@@ -51,7 +50,7 @@ impl Default for Settings {
             poll_interval_seconds: 60,
             overseerr: OverseerrSettings::default(),
             tautulli: TautulliSettings::default(),
-            qbittorrent: QbittorrentSettings::default(),
+            prometheus: PrometheusSettings::default(),
         }
     }
 }

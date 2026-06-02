@@ -1,4 +1,4 @@
 pub mod overseerr;
-pub mod qbittorrent;
+pub mod prometheus_rtorrent;
 pub mod tautulli;
 pub mod webhook;

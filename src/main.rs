@@ -5,7 +5,8 @@ use tokio::task::JoinSet;
 use tread::{
     Settings, api,
     clients::{
-        overseerr::OverseerrClient, qbittorrent::QbittorrentClient, tautulli::TautulliClient,
+        overseerr::OverseerrClient, prometheus_rtorrent::PrometheusRtorrentClient,
+        tautulli::TautulliClient,
     },
     db,
 };
@@ -38,11 +39,7 @@ struct ConfigureArgs {
     #[arg(long)]
     tautulli_api_key: Option<String>,
     #[arg(long)]
-    qbittorrent_url: Option<String>,
-    #[arg(long)]
-    qbittorrent_username: Option<String>,
-    #[arg(long)]
-    qbittorrent_password: Option<String>,
+    prometheus_url: Option<String>,
 }
 
 #[tokio::main]
@@ -79,11 +76,11 @@ async fn serve(settings: Settings) -> anyhow::Result<()> {
             tasks.spawn(async move { poll_tautulli(client, pool, interval).await });
         }
     }
-    if settings.qbittorrent.enabled {
-        if let Some(client) = QbittorrentClient::from_settings(&settings.qbittorrent) {
+    if settings.prometheus.enabled && settings.prometheus.rtorrent_enabled {
+        if let Some(client) = PrometheusRtorrentClient::from_settings(&settings.prometheus) {
             let pool = pool.clone();
             let interval = settings.poll_interval();
-            tasks.spawn(async move { poll_qbittorrent(client, pool, interval).await });
+            tasks.spawn(async move { poll_rtorrent_from_prometheus(client, pool, interval).await });
         }
     }
 
@@ -119,13 +116,17 @@ async fn poll_tautulli(client: TautulliClient, pool: sqlx::SqlitePool, interval:
     }
 }
 
-async fn poll_qbittorrent(client: QbittorrentClient, pool: sqlx::SqlitePool, interval: Duration) {
+async fn poll_rtorrent_from_prometheus(
+    client: PrometheusRtorrentClient,
+    pool: sqlx::SqlitePool,
+    interval: Duration,
+) {
     let mut ticker = tokio::time::interval(interval);
     loop {
         ticker.tick().await;
         match client.poll_torrents(&pool).await {
-            Ok(count) => tracing::debug!(count, "polled qbittorrent torrents"),
-            Err(_) => tracing::warn!("qbittorrent poll failed"),
+            Ok(count) => tracing::debug!(count, "polled rtorrent metrics from prometheus"),
+            Err(_) => tracing::warn!("rtorrent prometheus poll failed"),
         }
     }
 }
@@ -155,15 +156,10 @@ fn configure(args: ConfigureArgs) -> anyhow::Result<()> {
     if let Some(value) = args.tautulli_api_key {
         lines.push(format!("TREAD_TAUTULLI__API_KEY={value}"));
     }
-    if let Some(value) = args.qbittorrent_url {
-        lines.push(format!("TREAD_QBITTORRENT__BASE_URL={value}"));
-        lines.push("TREAD_QBITTORRENT__ENABLED=true".to_string());
-    }
-    if let Some(value) = args.qbittorrent_username {
-        lines.push(format!("TREAD_QBITTORRENT__USERNAME={value}"));
-    }
-    if let Some(value) = args.qbittorrent_password {
-        lines.push(format!("TREAD_QBITTORRENT__PASSWORD={value}"));
+    if let Some(value) = args.prometheus_url {
+        lines.push(format!("TREAD_PROMETHEUS__BASE_URL={value}"));
+        lines.push("TREAD_PROMETHEUS__ENABLED=true".to_string());
+        lines.push("TREAD_PROMETHEUS__RTORRENT_ENABLED=true".to_string());
     }
 
     std::fs::write(&args.output, format!("{}\n", lines.join("\n")))?;

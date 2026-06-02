@@ -168,13 +168,13 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         }
         observe_duration(
             &request_to_download_started,
-            &[&media_type, "qbittorrent"],
+            &[&media_type, "rtorrent"],
             &requested_at,
             row.get("download_started_at"),
         )?;
         observe_duration(
             &request_to_download_finished,
-            &[&media_type, "qbittorrent"],
+            &[&media_type, "rtorrent"],
             &requested_at,
             row.get("download_finished_at"),
         )?;

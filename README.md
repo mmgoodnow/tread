@@ -1,6 +1,6 @@
 # tread
 
-Small Rust service for observing media request lifecycle latency across Overseerr, Arr apps, qBittorrent, and Plex/Tautulli.
+Small Rust service for observing media request lifecycle latency across Overseerr, Arr apps, rTorrent, and Plex/Tautulli.
 
 Prometheus is intentionally not the source of truth. `tread` stores request and raw event history in SQLite, then computes low-cardinality Prometheus metrics from that durable state at `/metrics`.
 
@@ -14,7 +14,7 @@ Implemented:
 - Idempotent Overseerr request ingestion from webhook or API polling
 - Tautulli recently-added webhook/poll ingestion for request-to-Plex timing
 - Sonarr/Radarr webhook ingestion for grab/import lifecycle timestamps
-- qBittorrent HTTP polling for started/finished download events
+- rTorrent started/finished event derivation from Prometheus rtorrent-exporter metrics
 - Low-cardinality Prometheus counters, gauges, and histograms
 - `configure` subcommand for writing local environment files
 
@@ -39,9 +39,7 @@ cargo run -- configure \
   --overseerr-api-key "$OVERSEERR_API_KEY" \
   --tautulli-url http://tautulli.local:8181/ \
   --tautulli-api-key "$TAUTULLI_API_KEY" \
-  --qbittorrent-url http://qbittorrent.local:8080/ \
-  --qbittorrent-username "$QBITTORRENT_USERNAME" \
-  --qbittorrent-password "$QBITTORRENT_PASSWORD"
+  --prometheus-url http://prometheus.local:9090/
 ```
 
 Load it with your shell or Docker Compose before starting the service.
@@ -65,7 +63,7 @@ Raw payloads are stored in the `events` table for debugging. Correlation prefers
 
 Torrent names should only be used as a later fallback.
 
-The qBittorrent poller uses only HTTP API calls. It infers media type from category/tags (`radarr`, `sonarr`, `movies`, or `tv`) and then uses the torrent name as a fallback title because qBittorrent does not carry stable TMDB/TVDB/IMDB IDs. If that inference is too weak for your setup, keep the poller disabled until we add a stronger mapping source.
+The rTorrent poller reads the existing Prometheus rtorrent-exporter scrape via the Prometheus HTTP API, then stores derived lifecycle events in SQLite. Prometheus is still not the source of truth for lifecycle history. Because the exporter does not expose stable media IDs, rTorrent matching is conservative and only uses torrent names as a fallback when the name clearly resembles a movie year or TV `SxxExx` pattern.
 
 ## Active-airing TV
 
