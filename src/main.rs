@@ -103,7 +103,7 @@ async fn poll_overseerr(client: OverseerrClient, pool: sqlx::SqlitePool, interva
         ticker.tick().await;
         match client.poll_requests(&pool).await {
             Ok(count) => tracing::debug!(count, "polled overseerr requests"),
-            Err(error) => tracing::warn!(?error, "overseerr poll failed"),
+            Err(_) => tracing::warn!("overseerr poll failed"),
         }
     }
 }
@@ -114,7 +114,7 @@ async fn poll_tautulli(client: TautulliClient, pool: sqlx::SqlitePool, interval:
         ticker.tick().await;
         match client.poll_recently_added(&pool).await {
             Ok(count) => tracing::debug!(count, "polled tautulli recently added"),
-            Err(error) => tracing::warn!(?error, "tautulli poll failed"),
+            Err(_) => tracing::warn!("tautulli poll failed"),
         }
     }
 }
@@ -125,7 +125,7 @@ async fn poll_qbittorrent(client: QbittorrentClient, pool: sqlx::SqlitePool, int
         ticker.tick().await;
         match client.poll_torrents(&pool).await {
             Ok(count) => tracing::debug!(count, "polled qbittorrent torrents"),
-            Err(error) => tracing::warn!(?error, "qbittorrent poll failed"),
+            Err(_) => tracing::warn!("qbittorrent poll failed"),
         }
     }
 }
