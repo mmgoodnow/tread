@@ -176,9 +176,7 @@ async fn apply_lifecycle_timestamp(
     outcome: MatchOutcome,
     event: &EventIngest,
 ) -> anyhow::Result<()> {
-    let stage = lifecycle_column(event.source.as_str(), &event.event_type);
-
-    if let Some(column) = stage {
+    for column in lifecycle_columns(event.source.as_str(), &event.event_type) {
         apply_lifecycle_column(
             pool,
             outcome.media_request_id,
@@ -414,7 +412,7 @@ async fn reconcile_unmatched_event_rows(
         let event_type = row.get::<String, _>("event_type");
         let observed_at = row.get::<String, _>("observed_at");
 
-        if let Some(column) = lifecycle_column(&source, &event_type) {
+        for column in lifecycle_columns(&source, &event_type) {
             apply_lifecycle_column(
                 pool,
                 media_request_id,
@@ -444,30 +442,33 @@ async fn reconcile_unmatched_event_rows(
     Ok(())
 }
 
-fn lifecycle_column(source: &str, event_type: &str) -> Option<&'static str> {
+fn lifecycle_columns(source: &str, event_type: &str) -> Vec<&'static str> {
     let normalized = event_type.to_ascii_lowercase();
     match (source, normalized.as_str()) {
         ("tautulli", "recently_added") | ("plex", "recently_added") | (_, "plex_available") => {
-            Some("plex_available_at")
+            vec!["plex_available_at"]
         }
-        ("sonarr", "grab") | ("sonarr", "download") | ("sonarr", "episodegrabbed") => {
-            Some("sonarr_grabbed_at")
+        ("sonarr", "grab") | ("sonarr", "episodegrabbed") => {
+            vec!["sonarr_grabbed_at", "download_started_at"]
         }
-        ("sonarr", "import") | ("sonarr", "download_import") | ("sonarr", "episodefiledeleted") => {
-            Some("sonarr_imported_at")
+        ("sonarr", "download") | ("sonarr", "import") | ("sonarr", "download_import") => {
+            vec!["sonarr_imported_at", "download_finished_at"]
         }
-        ("radarr", "grab") | ("radarr", "download") | ("radarr", "moviegrabbed") => {
-            Some("radarr_grabbed_at")
+        ("radarr", "grab") | ("radarr", "moviegrabbed") => {
+            vec!["radarr_grabbed_at", "download_started_at"]
         }
-        ("radarr", "import") | ("radarr", "download_import") | ("radarr", "moviedownloaded") => {
-            Some("radarr_imported_at")
+        ("radarr", "download")
+        | ("radarr", "import")
+        | ("radarr", "download_import")
+        | ("radarr", "moviedownloaded") => {
+            vec!["radarr_imported_at", "download_finished_at"]
         }
-        ("torrent", "download_started") => Some("download_started_at"),
-        ("torrent", "download_finished") => Some("download_finished_at"),
+        ("torrent", "download_started") => vec!["download_started_at"],
+        ("torrent", "download_finished") => vec!["download_finished_at"],
         ("overseerr", "notification") | ("overseerr", "email_sent") => {
-            Some("overseerr_notification_sent_at")
+            vec!["overseerr_notification_sent_at"]
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
