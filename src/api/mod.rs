@@ -1,5 +1,5 @@
 use axum::{
-    Json, Router,
+    Form, Json, Router,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -9,7 +9,10 @@ use serde_json::{Value, json};
 use sqlx::SqlitePool;
 
 use crate::{
-    clients::webhook::{arr_event, generic_media_event, overseerr_request_from_payload},
+    clients::webhook::{
+        arr_event, generic_media_event, overseerr_request_from_payload, rtorrent_event,
+        rtorrent_payload_from_form,
+    },
     core::model::EventSource,
     db::{ingest_event, upsert_media_request},
     telemetry,
@@ -28,6 +31,7 @@ pub fn router(pool: SqlitePool) -> Router {
         .route("/webhooks/sonarr", post(sonarr_webhook))
         .route("/webhooks/radarr", post(radarr_webhook))
         .route("/webhooks/tautulli", post(tautulli_webhook))
+        .route("/webhooks/rtorrent", post(rtorrent_webhook))
         .with_state(AppState { pool })
 }
 
@@ -102,6 +106,60 @@ async fn tautulli_webhook(
         StatusCode::ACCEPTED,
         Json(json!({ "media_request_id": outcome.map(|value| value.media_request_id) })),
     ))
+}
+
+async fn rtorrent_webhook(
+    State(state): State<AppState>,
+    body: RtorrentBody,
+) -> Result<impl IntoResponse, ApiError> {
+    let outcome = ingest_event(&state.pool, rtorrent_event(body.into_value())).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "media_request_id": outcome.map(|value| value.media_request_id) })),
+    ))
+}
+
+enum RtorrentBody {
+    Json(Value),
+    Form(std::collections::HashMap<String, String>),
+}
+
+impl axum::extract::FromRequest<AppState> for RtorrentBody {
+    type Rejection = Response;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let content_type = req
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+
+        if content_type.starts_with("application/x-www-form-urlencoded") {
+            let Form(form) =
+                Form::<std::collections::HashMap<String, String>>::from_request(req, state)
+                    .await
+                    .map_err(IntoResponse::into_response)?;
+            return Ok(Self::Form(form));
+        }
+
+        let Json(payload) = Json::<Value>::from_request(req, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self::Json(payload))
+    }
+}
+
+impl RtorrentBody {
+    fn into_value(self) -> Value {
+        match self {
+            Self::Json(payload) => payload,
+            Self::Form(form) => rtorrent_payload_from_form(form),
+        }
+    }
 }
 
 #[derive(Debug)]

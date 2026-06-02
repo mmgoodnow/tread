@@ -2,7 +2,9 @@ use chrono::{TimeZone, Utc};
 use serde_json::json;
 use sqlx::Row;
 use tread::{
-    clients::webhook::{arr_event, generic_media_event},
+    clients::webhook::{
+        arr_event, generic_media_event, rtorrent_event, rtorrent_payload_from_form,
+    },
     core::model::{
         AvailabilityClass, EventSource, IncomingRequest, MediaIdentity, MediaRequestItemInput,
         MediaType,
@@ -296,6 +298,79 @@ async fn title_only_plex_match_updates_generic_movie_item() {
     let metrics = render_metrics(&pool).await.expect("metrics render");
     assert!(metrics.contains(
         "media_request_to_plex_available_seconds_sum{media_type=\"movie\",source=\"tautulli\"} 529"
+    ));
+}
+
+#[tokio::test]
+async fn rtorrent_form_hook_marks_download_finished_by_title_fallback() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(546),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(10843),
+                tvdb_id: None,
+                imdb_id: Some("tt0088680".to_string()),
+                title: Some("After Hours".to_string()),
+                year: Some(1985),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "After Hours".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 2, 51, 18).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    let payload = rtorrent_payload_from_form(
+        [
+            ("info_hash".to_string(), "abc123".to_string()),
+            (
+                "base_path".to_string(),
+                "/downloads/After.Hours.1985.1080p".to_string(),
+            ),
+            ("complete".to_string(), "1".to_string()),
+            (
+                "observed_at".to_string(),
+                "2026-06-02T03:00:05Z".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    ingest_event(&pool, rtorrent_event(payload))
+        .await
+        .expect("rtorrent event ingest");
+
+    let row = sqlx::query(
+        "SELECT download_finished_at FROM media_requests WHERE overseerr_request_id = 546",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("request row");
+    assert_eq!(
+        row.get::<Option<String>, _>("download_finished_at")
+            .as_deref(),
+        Some("2026-06-02T03:00:05+00:00")
+    );
+
+    let metrics = render_metrics(&pool).await.expect("metrics render");
+    assert!(metrics.contains(
+        "media_request_to_download_finished_seconds_sum{download_client=\"rtorrent\",media_type=\"movie\"} 527"
     ));
 }
 

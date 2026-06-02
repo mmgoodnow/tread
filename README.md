@@ -14,7 +14,7 @@ Implemented:
 - Idempotent Overseerr request ingestion from webhook or API polling
 - Tautulli recently-added webhook/poll ingestion for request-to-Plex timing
 - Sonarr/Radarr webhook ingestion for grab/import lifecycle timestamps
-- rTorrent started/finished event derivation from Prometheus rtorrent-exporter metrics
+- rTorrent started/finished ingestion from rTorrent shell hooks
 - Low-cardinality Prometheus counters, gauges, and histograms
 - `configure` subcommand for writing local environment files
 
@@ -51,6 +51,7 @@ Configure these URLs in the source apps when available:
 - `POST /webhooks/sonarr`
 - `POST /webhooks/radarr`
 - `POST /webhooks/tautulli`
+- `POST /webhooks/rtorrent`
 
 Raw payloads are stored in the `events` table for debugging. Correlation prefers stable IDs in this order:
 
@@ -62,7 +63,16 @@ Raw payloads are stored in the `events` table for debugging. Correlation prefers
 
 Torrent names should only be used as a later fallback.
 
-The rTorrent poller reads the existing Prometheus rtorrent-exporter scrape via the Prometheus HTTP API at `http://prometheus:9090/`, then stores derived lifecycle events in SQLite. Prometheus is still not the source of truth for lifecycle history. Because the exporter does not expose stable media IDs, rTorrent matching is conservative and only uses torrent names as a fallback when the name clearly resembles a movie year or TV `SxxExx` pattern.
+The rTorrent integration is push-based. Configure rTorrent hooks to call `POST /webhooks/rtorrent` with URL-encoded fields:
+
+- `info_hash`
+- `base_path`
+- `label`
+- `complete`
+- `event_type`, optional; inferred as `download_started` when `complete != 1`, otherwise `download_finished`
+- `observed_at`, optional RFC3339 timestamp
+
+The existing Prometheus rtorrent-exporter scrape is not used for lifecycle correlation by default because it exposes only aggregate counters in this deployment, not per-torrent labels.
 
 ## Active-airing TV
 

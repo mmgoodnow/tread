@@ -1,5 +1,5 @@
 use chrono::{DateTime, TimeZone, Utc};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{
     core::model::{
@@ -173,6 +173,71 @@ pub fn generic_media_event(
     }
 }
 
+pub fn rtorrent_event(payload: Value) -> EventIngest {
+    let event_type = text_at(&payload, &["event_type"])
+        .or_else(|| text_at(&payload, &["eventType"]))
+        .unwrap_or_else(|| "download_finished".to_string());
+    let raw_name = text_at(&payload, &["title"])
+        .or_else(|| text_at(&payload, &["name"]))
+        .or_else(|| text_at(&payload, &["base_path"]).and_then(|path| raw_basename(&path)));
+    let title = raw_name.as_deref().map(clean_title);
+    let media_type = text_at(&payload, &["media_type"])
+        .or_else(|| {
+            raw_name
+                .as_deref()
+                .and_then(infer_media_type)
+                .map(str::to_string)
+        })
+        .and_then(|value| MediaType::try_from(value.as_str()).ok());
+    let identity = media_type.map(|media_type| MediaIdentity {
+        media_type,
+        tmdb_id: None,
+        tvdb_id: None,
+        imdb_id: None,
+        title: title.clone(),
+        year: raw_name.as_deref().and_then(infer_year),
+        season_number: raw_name.as_deref().and_then(infer_season_number),
+        episode_number: raw_name.as_deref().and_then(infer_episode_number),
+    });
+    let external_id = text_at(&payload, &["external_id"]).or_else(|| {
+        text_at(&payload, &["info_hash"])
+            .or_else(|| text_at(&payload, &["infoHash"]))
+            .map(|hash| format!("{hash}:{event_type}"))
+    });
+
+    EventIngest {
+        source: EventSource::Torrent,
+        event_type,
+        external_id,
+        identity,
+        observed_at: event_observed_at(EventSource::Torrent, "download_finished", &payload),
+        payload_json: payload,
+    }
+}
+
+pub fn rtorrent_payload_from_form(form: std::collections::HashMap<String, String>) -> Value {
+    let event_type = form
+        .get("event_type")
+        .cloned()
+        .or_else(|| form.get("eventType").cloned())
+        .unwrap_or_else(|| {
+            if form.get("complete").is_some_and(|value| value == "1") {
+                "download_finished".to_string()
+            } else {
+                "download_started".to_string()
+            }
+        });
+
+    json!({
+        "event_type": event_type,
+        "info_hash": form.get("info_hash").or_else(|| form.get("infoHash")),
+        "base_path": form.get("base_path").or_else(|| form.get("basePath")),
+        "label": form.get("label"),
+        "complete": form.get("complete"),
+        "observed_at": form.get("observed_at").or_else(|| form.get("observedAt")),
+    })
+}
+
 pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
     let event_type = text_at(&payload, &["eventType"])
         .or_else(|| text_at(&payload, &["event_type"]))
@@ -235,6 +300,94 @@ fn int_at(value: &Value, path: &[&str]) -> Option<i64> {
         .as_i64()
         .or_else(|| cursor.as_u64().and_then(|n| i64::try_from(n).ok()))
         .or_else(|| cursor.as_str()?.parse().ok())
+}
+
+fn raw_basename(path: &str) -> Option<String> {
+    path.rsplit('/')
+        .find(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .filter(|name| !name.is_empty())
+}
+
+fn clean_title(name: &str) -> String {
+    let normalized = name
+        .split(['.', '_'])
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+
+    let parts = normalized.split_whitespace().collect::<Vec<_>>();
+    if let Some(year_index) = parts.iter().position(|part| {
+        part.len() == 4
+            && part
+                .parse::<i64>()
+                .is_ok_and(|year| (1900..=2100).contains(&year))
+    }) {
+        return parts[..year_index].join(" ");
+    }
+
+    if let Some(episode_index) = parts.iter().position(|part| {
+        let lower = part.to_ascii_lowercase();
+        let bytes = lower.as_bytes();
+        bytes.len() == 6
+            && bytes[0] == b's'
+            && bytes[1].is_ascii_digit()
+            && bytes[2].is_ascii_digit()
+            && bytes[3] == b'e'
+            && bytes[4].is_ascii_digit()
+            && bytes[5].is_ascii_digit()
+    }) {
+        return parts[..episode_index].join(" ");
+    }
+
+    normalized
+}
+
+fn infer_media_type(title: &str) -> Option<&'static str> {
+    let lower = title.to_ascii_lowercase();
+    if infer_season_number(&lower).is_some() && infer_episode_number(&lower).is_some() {
+        return Some("series");
+    }
+    infer_year(title).map(|_| "movie")
+}
+
+fn infer_year(title: &str) -> Option<i64> {
+    title
+        .split(|ch: char| !ch.is_ascii_digit())
+        .find_map(|part| {
+            (part.len() == 4)
+                .then(|| part.parse::<i64>().ok())
+                .flatten()
+                .filter(|year| (1900..=2100).contains(year))
+        })
+}
+
+fn infer_season_number(title: &str) -> Option<i64> {
+    infer_episode_parts(title).map(|(season, _)| season)
+}
+
+fn infer_episode_number(title: &str) -> Option<i64> {
+    infer_episode_parts(title).map(|(_, episode)| episode)
+}
+
+fn infer_episode_parts(title: &str) -> Option<(i64, i64)> {
+    let lower = title.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    for window in bytes.windows(6) {
+        if window[0] == b's'
+            && window[1].is_ascii_digit()
+            && window[2].is_ascii_digit()
+            && window[3] == b'e'
+            && window[4].is_ascii_digit()
+            && window[5].is_ascii_digit()
+        {
+            let season = std::str::from_utf8(&window[1..3]).ok()?.parse().ok()?;
+            let episode = std::str::from_utf8(&window[4..6]).ok()?.parse().ok()?;
+            return Some((season, episode));
+        }
+    }
+    None
 }
 
 fn event_observed_at(

@@ -50,7 +50,7 @@ impl Default for PrometheusSettings {
                     .parse()
                     .expect("valid prometheus url"),
             ),
-            rtorrent_enabled: true,
+            rtorrent_enabled: false,
             enabled: true,
         }
     }
