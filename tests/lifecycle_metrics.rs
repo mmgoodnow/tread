@@ -157,6 +157,98 @@ async fn radarr_download_marks_download_finished() {
 }
 
 #[tokio::test]
+async fn earlier_rtorrent_finish_replaces_later_radarr_generic_finish() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(549),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(10388),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("The Limey (1999)".to_string()),
+                year: Some(1999),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "The Limey (1999)".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 6, 4, 9).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    ingest_event(
+        &pool,
+        arr_event(
+            EventSource::Radarr,
+            json!({
+                "eventType": "Download",
+                "movie": {
+                    "tmdbId": 10388,
+                    "title": "The Limey",
+                    "year": 1999
+                },
+                "downloadId": "download-1",
+                "observed_at": "2026-06-02T06:22:19Z"
+            }),
+        ),
+    )
+    .await
+    .expect("radarr event ingest");
+
+    let payload = rtorrent_payload_from_form(
+        [
+            ("info_hash".to_string(), "abc123".to_string()),
+            (
+                "base_path".to_string(),
+                "/downloads/The.Limey.1999.1080p.mkv".to_string(),
+            ),
+            ("complete".to_string(), "1".to_string()),
+            (
+                "observed_at".to_string(),
+                "2026-06-02T06:20:50Z".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    ingest_event(&pool, rtorrent_event(payload))
+        .await
+        .expect("rtorrent event ingest");
+
+    let row = sqlx::query(
+        "SELECT radarr_imported_at, download_finished_at FROM media_requests WHERE overseerr_request_id = 549",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("request row");
+    assert_eq!(
+        row.get::<Option<String>, _>("radarr_imported_at")
+            .as_deref(),
+        Some("2026-06-02T06:22:19+00:00")
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("download_finished_at")
+            .as_deref(),
+        Some("2026-06-02T06:20:50+00:00")
+    );
+}
+
+#[tokio::test]
 async fn request_upsert_does_not_overwrite_real_title_with_numeric_fallback() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
@@ -372,6 +464,68 @@ async fn rtorrent_form_hook_marks_download_finished_by_title_fallback() {
     assert!(metrics.contains(
         "media_request_to_download_finished_seconds_sum{download_client=\"rtorrent\",media_type=\"movie\"} 527"
     ));
+}
+
+#[tokio::test]
+async fn request_upsert_reconciles_prior_unmatched_tautulli_by_normalized_title() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    let event = generic_media_event(
+        EventSource::Tautulli,
+        "recently_added",
+        json!({
+            "event_type": "recently_added",
+            "external_id": "plex-rating-key-limey",
+            "media_type": "movie",
+            "title": "The Limey",
+            "year": 1999,
+            "added_at": 1780381340,
+            "observed_at": "2026-06-02T06:22:20Z"
+        }),
+    );
+    ingest_event(&pool, event).await.expect("event ingest");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(549),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(10388),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("The Limey (1999)".to_string()),
+                year: Some(1999),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "The Limey (1999)".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 6, 4, 9).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    let row = sqlx::query(
+        "SELECT plex_available_at FROM media_requests WHERE overseerr_request_id = 549",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("request row");
+    assert_eq!(
+        row.get::<Option<String>, _>("plex_available_at").as_deref(),
+        Some("2026-06-02T06:22:20+00:00")
+    );
 }
 
 #[tokio::test]

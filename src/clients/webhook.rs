@@ -173,7 +173,7 @@ pub fn generic_media_event(
     }
 }
 
-pub fn rtorrent_event(payload: Value) -> EventIngest {
+pub fn rtorrent_event(mut payload: Value) -> EventIngest {
     let event_type = text_at(&payload, &["event_type"])
         .or_else(|| text_at(&payload, &["eventType"]))
         .unwrap_or_else(|| "download_finished".to_string());
@@ -204,13 +204,40 @@ pub fn rtorrent_event(payload: Value) -> EventIngest {
             .or_else(|| text_at(&payload, &["infoHash"]))
             .map(|hash| format!("{hash}:{event_type}"))
     });
+    if let Some(object) = payload.as_object_mut() {
+        if let Some(title) = &title {
+            object
+                .entry("title")
+                .or_insert_with(|| Value::String(title.clone()));
+        }
+        if let Some(identity) = &identity {
+            object
+                .entry("media_type")
+                .or_insert_with(|| Value::String(identity.media_type.as_str().to_string()));
+            if let Some(year) = identity.year {
+                object
+                    .entry("year")
+                    .or_insert_with(|| Value::Number(year.into()));
+            }
+            if let Some(season_number) = identity.season_number {
+                object
+                    .entry("season_number")
+                    .or_insert_with(|| Value::Number(season_number.into()));
+            }
+            if let Some(episode_number) = identity.episode_number {
+                object
+                    .entry("episode_number")
+                    .or_insert_with(|| Value::Number(episode_number.into()));
+            }
+        }
+    }
 
     EventIngest {
         source: EventSource::Torrent,
-        event_type,
+        event_type: event_type.clone(),
         external_id,
         identity,
-        observed_at: event_observed_at(EventSource::Torrent, "download_finished", &payload),
+        observed_at: event_observed_at(EventSource::Torrent, &event_type, &payload),
         payload_json: payload,
     }
 }
@@ -275,7 +302,9 @@ pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
             .or_else(|| text_at(&payload, &["release", "guid"]))
             .or_else(|| int_at(root, &["id"]).map(|id| id.to_string())),
         identity: Some(identity),
-        observed_at: Utc::now(),
+        observed_at: parse_datetime_or_now(
+            payload.get("observed_at").or_else(|| payload.get("date")),
+        ),
         payload_json: payload,
     }
 }

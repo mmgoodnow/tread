@@ -272,9 +272,11 @@ async fn apply_lifecycle_column(
     match media_request_item_id {
         Some(media_request_item_id) => {
             let sql = format!(
-                "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+                "UPDATE media_request_items SET {column} = CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
             );
             sqlx::query(&sql)
+                .bind(observed_at)
+                .bind(observed_at)
                 .bind(observed_at)
                 .bind(confidence)
                 .bind(media_request_item_id)
@@ -283,9 +285,11 @@ async fn apply_lifecycle_column(
         }
         None => {
             let sql = format!(
-                "UPDATE media_request_items SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE media_request_id = ? AND season_number IS NULL AND episode_number IS NULL"
+                "UPDATE media_request_items SET {column} = CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE media_request_id = ? AND season_number IS NULL AND episode_number IS NULL"
             );
             sqlx::query(&sql)
+                .bind(observed_at)
+                .bind(observed_at)
                 .bind(observed_at)
                 .bind(confidence)
                 .bind(media_request_id)
@@ -295,9 +299,11 @@ async fn apply_lifecycle_column(
     }
 
     let sql = format!(
-        "UPDATE media_requests SET {column} = COALESCE({column}, ?), match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+        "UPDATE media_requests SET {column} = CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
     );
     sqlx::query(&sql)
+        .bind(observed_at)
+        .bind(observed_at)
         .bind(observed_at)
         .bind(confidence)
         .bind(media_request_id)
@@ -367,6 +373,18 @@ async fn reconcile_unmatched_events(
             ],
             imdb_id,
             0.9,
+        )
+        .await?;
+    }
+
+    if let Some(title) = &identity.title {
+        reconcile_unmatched_events_by_normalized_title(
+            pool,
+            media_request_id,
+            media_request_item_id,
+            identity,
+            title,
+            0.6,
         )
         .await?;
     }
@@ -480,6 +498,75 @@ async fn reconcile_unmatched_events_by_text_json_value(
         rows,
     )
     .await
+}
+
+async fn reconcile_unmatched_events_by_normalized_title(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    identity: &MediaIdentity,
+    title: &str,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    let normalized_title = correlation::normalize_title(title);
+    if normalized_title.is_empty() {
+        return Ok(());
+    }
+
+    let rows = sqlx::query(
+        r#"
+        SELECT id, source, event_type, observed_at, payload_json
+        FROM events
+        WHERE media_request_id IS NULL
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let rows = rows
+        .into_iter()
+        .filter_map(|row| {
+            let payload = row.get::<String, _>("payload_json");
+            let payload = serde_json::from_str::<Value>(&payload).ok()?;
+
+            let event_media_type = text_from_payload(&payload, &["media_type"])
+                .or_else(|| text_from_payload(&payload, &["mediaType"]))
+                .and_then(|value| MediaType::try_from(value.as_str()).ok());
+            if event_media_type.is_some_and(|media_type| media_type != identity.media_type) {
+                return None;
+            }
+
+            let event_title = text_from_payload(&payload, &["title"])
+                .or_else(|| text_from_payload(&payload, &["grandparent_title"]))
+                .or_else(|| text_from_payload(&payload, &["request", "title"]))
+                .or_else(|| text_from_payload(&payload, &["media", "title"]))?;
+            if correlation::normalize_title(&event_title) != normalized_title {
+                return None;
+            }
+
+            Some(row)
+        })
+        .collect::<Vec<_>>();
+
+    reconcile_unmatched_event_rows(
+        pool,
+        media_request_id,
+        media_request_item_id,
+        confidence,
+        rows,
+    )
+    .await
+}
+
+fn text_from_payload(value: &Value, path: &[&str]) -> Option<String> {
+    let mut cursor = value;
+    for segment in path {
+        cursor = cursor.get(*segment)?;
+    }
+    cursor
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| cursor.as_i64().map(|n| n.to_string()))
 }
 
 async fn reconcile_unmatched_event_rows(
