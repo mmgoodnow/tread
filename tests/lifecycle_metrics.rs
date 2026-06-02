@@ -249,6 +249,67 @@ async fn earlier_rtorrent_finish_replaces_later_radarr_generic_finish() {
 }
 
 #[tokio::test]
+async fn metrics_include_post_download_and_notification_lag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(549),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(10388),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("The Limey (1999)".to_string()),
+                year: Some(1999),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "The Limey (1999)".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 6, 4, 9).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET download_finished_at = '2026-06-02T06:20:50+00:00',
+            radarr_imported_at = '2026-06-02T06:22:20+00:00',
+            plex_available_at = '2026-06-02T06:22:30+00:00',
+            overseerr_notification_sent_at = '2026-06-02T06:23:00+00:00'
+        WHERE media_request_id = (
+            SELECT id FROM media_requests WHERE overseerr_request_id = 549
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let metrics = render_metrics(&pool).await.expect("metrics render");
+
+    assert!(metrics.contains(
+        "media_request_download_finished_to_arr_import_seconds_sum{arr=\"radarr\",media_type=\"movie\"} 90"
+    ));
+    assert!(metrics.contains(
+        "media_request_plex_available_to_overseerr_notification_seconds_sum{media_type=\"movie\"} 30"
+    ));
+}
+
+#[tokio::test]
 async fn request_upsert_does_not_overwrite_real_title_with_numeric_fallback() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());

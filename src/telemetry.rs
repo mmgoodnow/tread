@@ -99,6 +99,22 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         .buckets(EPISODE_AIR_BUCKETS.to_vec()),
         &["source"],
     )?;
+    let download_finished_to_arr_import = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_download_finished_to_arr_import_seconds",
+            "Seconds from BitTorrent download completion to Arr import completion.",
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
+        &["media_type", "arr"],
+    )?;
+    let plex_to_notification = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_plex_available_to_overseerr_notification_seconds",
+            "Seconds from Plex availability to Overseerr available notification.",
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
+        &["media_type"],
+    )?;
 
     let requests_total = IntCounterVec::new(
         Opts::new("media_requests_total", "Total tracked media requests."),
@@ -132,6 +148,13 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         ),
         &["source"],
     )?;
+    let unmatched_recent = GaugeVec::new(
+        Opts::new(
+            "media_request_lifecycle_unmatched_events_recent",
+            "Recently observed lifecycle events without a matching media request.",
+        ),
+        &["source", "window"],
+    )?;
 
     registry.register(Box::new(request_to_plex.clone()))?;
     registry.register(Box::new(request_to_download_started.clone()))?;
@@ -140,11 +163,14 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
     registry.register(Box::new(request_to_first_available.clone()))?;
     registry.register(Box::new(item_to_plex.clone()))?;
     registry.register(Box::new(episode_air_to_plex.clone()))?;
+    registry.register(Box::new(download_finished_to_arr_import.clone()))?;
+    registry.register(Box::new(plex_to_notification.clone()))?;
     registry.register(Box::new(requests_total.clone()))?;
     registry.register(Box::new(events_total.clone()))?;
     registry.register(Box::new(failures_total.clone()))?;
     registry.register(Box::new(inflight.clone()))?;
     registry.register(Box::new(unmatched.clone()))?;
+    registry.register(Box::new(unmatched_recent.clone()))?;
 
     let request_rows = sqlx::query(
         r#"
@@ -168,6 +194,7 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         r#"
         SELECT media_type, availability_class, requested_at, air_date,
                download_started_at, download_finished_at,
+               sonarr_imported_at, radarr_imported_at,
                plex_available_at, overseerr_notification_sent_at
         FROM media_request_items
         "#,
@@ -226,6 +253,28 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
             &request_to_notification,
             &[&media_type, "best_effort"],
             &requested_at,
+            row.get("overseerr_notification_sent_at"),
+        )?;
+        let download_finished_at = row.get::<Option<String>, _>("download_finished_at");
+        if media_type == "movie" {
+            observe_duration_between(
+                &download_finished_to_arr_import,
+                &[&media_type, "radarr"],
+                download_finished_at.clone(),
+                row.get("radarr_imported_at"),
+            )?;
+        } else {
+            observe_duration_between(
+                &download_finished_to_arr_import,
+                &[&media_type, "sonarr"],
+                download_finished_at.clone(),
+                row.get("sonarr_imported_at"),
+            )?;
+        }
+        observe_duration_between(
+            &plex_to_notification,
+            &[&media_type],
+            plex_available_at.clone(),
             row.get("overseerr_notification_sent_at"),
         )?;
 
@@ -313,6 +362,28 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         unmatched.with_label_values(&[&source]).set(count as f64);
     }
 
+    for (window, sqlite_modifier) in [("1h", "-1 hour"), ("24h", "-24 hours")] {
+        for row in sqlx::query(
+            r#"
+            SELECT source, COUNT(*) AS count
+            FROM events
+            WHERE media_request_id IS NULL
+              AND julianday(observed_at) >= julianday('now', ?)
+            GROUP BY source
+            "#,
+        )
+        .bind(sqlite_modifier)
+        .fetch_all(pool)
+        .await?
+        {
+            let source: String = row.get("source");
+            let count: i64 = row.get("count");
+            unmatched_recent
+                .with_label_values(&[&source, window])
+                .set(count as f64);
+        }
+    }
+
     failures_total
         .with_label_values(&["correlation", "unmatched_event"])
         .inc_by(unmatched_total(pool).await?.try_into()?);
@@ -337,6 +408,24 @@ fn observe_duration(
     let seconds = completed_at
         .signed_duration_since(requested_at)
         .num_seconds();
+    if seconds >= 0 {
+        histogram.with_label_values(labels).observe(seconds as f64);
+    }
+    Ok(())
+}
+
+fn observe_duration_between(
+    histogram: &HistogramVec,
+    labels: &[&str],
+    started_at: Option<String>,
+    completed_at: Option<String>,
+) -> anyhow::Result<()> {
+    let (Some(started_at), Some(completed_at)) = (started_at, completed_at) else {
+        return Ok(());
+    };
+    let started_at = chrono::DateTime::parse_from_rfc3339(&started_at)?;
+    let completed_at = chrono::DateTime::parse_from_rfc3339(&completed_at)?;
+    let seconds = completed_at.signed_duration_since(started_at).num_seconds();
     if seconds >= 0 {
         histogram.with_label_values(labels).observe(seconds as f64);
     }
