@@ -269,10 +269,11 @@ async fn apply_lifecycle_column(
     observed_at: &str,
     confidence: f64,
 ) -> anyhow::Result<()> {
+    let assignment = lifecycle_assignment(column);
     match media_request_item_id {
         Some(media_request_item_id) => {
             let sql = format!(
-                "UPDATE media_request_items SET {column} = CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+                "UPDATE media_request_items SET {column} = {assignment}, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
             );
             sqlx::query(&sql)
                 .bind(observed_at)
@@ -285,7 +286,7 @@ async fn apply_lifecycle_column(
         }
         None => {
             let sql = format!(
-                "UPDATE media_request_items SET {column} = CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE media_request_id = ? AND season_number IS NULL AND episode_number IS NULL"
+                "UPDATE media_request_items SET {column} = {assignment}, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE media_request_id = ? AND season_number IS NULL AND episode_number IS NULL"
             );
             sqlx::query(&sql)
                 .bind(observed_at)
@@ -299,7 +300,7 @@ async fn apply_lifecycle_column(
     }
 
     let sql = format!(
-        "UPDATE media_requests SET {column} = CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
+        "UPDATE media_requests SET {column} = {assignment}, match_confidence = MAX(match_confidence, ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?"
     );
     sqlx::query(&sql)
         .bind(observed_at)
@@ -311,6 +312,18 @@ async fn apply_lifecycle_column(
         .await?;
 
     Ok(())
+}
+
+fn lifecycle_assignment(column: &str) -> String {
+    if column == "overseerr_notification_sent_at" {
+        return format!(
+            "CASE WHEN {column} IS NULL OR (plex_available_at IS NOT NULL AND julianday({column}) < julianday(plex_available_at)) OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END"
+        );
+    }
+
+    format!(
+        "CASE WHEN {column} IS NULL OR (julianday(?) IS NOT NULL AND julianday({column}) IS NOT NULL AND julianday(?) < julianday({column})) THEN ? ELSE {column} END"
+    )
 }
 
 async fn reconcile_unmatched_events(

@@ -738,6 +738,111 @@ async fn overseerr_media_available_sets_available_notification_timestamp() {
 }
 
 #[tokio::test]
+async fn overseerr_media_available_replaces_pre_plex_notification_timestamp() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    let media_request_id = upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(549),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(10388),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("The Limey (1999)".to_string()),
+                year: Some(1999),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "The Limey (1999)".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 6, 4, 9).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_requests
+        SET plex_available_at = '2026-06-02T06:22:20+00:00',
+            overseerr_notification_sent_at = '2026-06-02T06:04:09+00:00'
+        WHERE id = ?
+        "#,
+    )
+    .bind(media_request_id)
+    .execute(&pool)
+    .await
+    .expect("request update");
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET plex_available_at = '2026-06-02T06:22:20+00:00',
+            overseerr_notification_sent_at = '2026-06-02T06:04:09+00:00'
+        WHERE media_request_id = ?
+        "#,
+    )
+    .bind(media_request_id)
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let event = generic_media_event(
+        EventSource::Overseerr,
+        "notification",
+        json!({
+            "notification_type": "MEDIA_AVAILABLE",
+            "request": {
+                "id": "549",
+                "type": "movie",
+                "title": "The Limey (1999)",
+                "media": {
+                    "mediaType": "movie",
+                    "tmdbId": "10388",
+                    "title": "The Limey (1999)"
+                }
+            },
+            "observed_at": "2026-06-02T11:02:57Z"
+        }),
+    );
+    ingest_event(&pool, event).await.expect("event ingest");
+
+    let row = sqlx::query(
+        r#"
+        SELECT mr.overseerr_notification_sent_at AS request_notification,
+               mri.overseerr_notification_sent_at AS item_notification
+        FROM media_requests mr
+        JOIN media_request_items mri ON mri.media_request_id = mr.id
+        WHERE mr.id = ?
+        "#,
+    )
+    .bind(media_request_id)
+    .fetch_one(&pool)
+    .await
+    .expect("request row");
+
+    assert_eq!(
+        row.get::<Option<String>, _>("request_notification")
+            .as_deref(),
+        Some("2026-06-02T11:02:57+00:00")
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("item_notification").as_deref(),
+        Some("2026-06-02T11:02:57+00:00")
+    );
+}
+
+#[tokio::test]
 async fn metrics_include_correlated_request_to_plex_duration() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
