@@ -73,12 +73,17 @@
       },
       "targets": [
         {
-          "expr": "sum by (media_type, download_client) (media_request_to_download_started_seconds_sum) / sum by (media_type, download_client) (media_request_to_download_started_seconds_count)",
-          "legendFormat": "{{media_type}} {{download_client}}",
+          "expr": "sum by (media_type, download_client) (media_request_to_download_started_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_started_seconds_count{media_type=\"movie\"})",
+          "legendFormat": "movie request to start",
           "refId": "A"
+        },
+        {
+          "expr": "sum by (source) (media_episode_air_to_download_started_seconds_sum) / sum by (source) (media_episode_air_to_download_started_seconds_count)",
+          "legendFormat": "series air to start",
+          "refId": "B"
         }
       ],
-      "title": "Request to download start avg",
+      "title": "Download start avg",
       "type": "stat"
     },
     {
@@ -187,14 +192,19 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (media_type, download_client) (media_request_to_download_finished_seconds_sum) / sum by (media_type, download_client) (media_request_to_download_finished_seconds_count)",
-          "legendFormat": "request to download done {{media_type}} {{download_client}}",
+          "expr": "sum by (media_type, download_client) (media_request_to_download_finished_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_finished_seconds_count{media_type=\"movie\"})",
+          "legendFormat": "request to download done movie {{download_client}}",
           "refId": "B"
         },
         {
           "expr": "sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_sum) / sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_count)",
           "legendFormat": "download done to arr {{media_type}} {{arr}}",
           "refId": "C"
+        },
+        {
+          "expr": "sum by (source) (media_episode_air_to_download_started_seconds_sum) / sum by (source) (media_episode_air_to_download_started_seconds_count)",
+          "legendFormat": "air to download start series {{source}}",
+          "refId": "D"
         }
       ],
       "title": "Average lifecycle durations",
@@ -369,5 +379,5 @@
   "timezone": "browser",
   "title": "Tread Media Lifecycle",
   "uid": "tread-lifecycle",
-  "version": 4
+  "version": 5
 }

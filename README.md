@@ -88,6 +88,7 @@ Exposed histograms:
 - `media_request_to_first_available_seconds{media_type,availability_class}`
 - `media_request_item_to_plex_available_seconds{media_type,availability_class,source}`
 - `media_episode_air_to_plex_available_seconds{source}`
+- `media_episode_air_to_download_started_seconds{source}`
 - `media_request_to_download_started_seconds{media_type,download_client}`
 - `media_request_to_download_finished_seconds{media_type,download_client}`
 - `media_request_to_overseerr_notification_seconds{media_type,notification_type}`

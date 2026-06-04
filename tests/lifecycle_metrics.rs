@@ -966,3 +966,70 @@ async fn future_airing_items_use_air_date_latency() {
         "media_request_to_plex_available_seconds_sum{media_type=\"series\",source=\"tautulli\"} 608400"
     ));
 }
+
+#[tokio::test]
+async fn sonarr_grab_reports_episode_air_to_download_start_latency() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(456),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(278174),
+                tvdb_id: Some(457154),
+                imdb_id: None,
+                title: Some("Girl Rules".to_string()),
+                year: None,
+                season_number: Some(1),
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(1),
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Unknown,
+            }],
+            title: "Girl Rules".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 3, 9, 15, 10, 14).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    ingest_event(
+        &pool,
+        arr_event(
+            EventSource::Sonarr,
+            json!({
+                "eventType": "Grab",
+                "series": {
+                    "title": "Girl Rules",
+                    "tvdbId": 457154,
+                    "tmdbId": 278174,
+                    "type": "standard"
+                },
+                "episodes": [{
+                    "seasonNumber": 1,
+                    "episodeNumber": 12,
+                    "airDateUtc": "2026-06-01T13:30:00Z"
+                }],
+                "downloadId": "download-1",
+                "observed_at": "2026-06-02T12:15:02Z"
+            }),
+        ),
+    )
+    .await
+    .expect("sonarr grab ingest");
+
+    let metrics = render_metrics(&pool).await.expect("metrics render");
+    assert!(
+        metrics
+            .contains("media_episode_air_to_download_started_seconds_sum{source=\"sonarr\"} 81902")
+    );
+}

@@ -99,6 +99,14 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         .buckets(EPISODE_AIR_BUCKETS.to_vec()),
         &["source"],
     )?;
+    let episode_air_to_download_started = HistogramVec::new(
+        HistogramOpts::new(
+            "media_episode_air_to_download_started_seconds",
+            "Seconds from episode air date to download start for future-airing items.",
+        )
+        .buckets(EPISODE_AIR_BUCKETS.to_vec()),
+        &["source"],
+    )?;
     let download_finished_to_arr_import = HistogramVec::new(
         HistogramOpts::new(
             "media_request_download_finished_to_arr_import_seconds",
@@ -156,6 +164,7 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
     registry.register(Box::new(request_to_first_available.clone()))?;
     registry.register(Box::new(item_to_plex.clone()))?;
     registry.register(Box::new(episode_air_to_plex.clone()))?;
+    registry.register(Box::new(episode_air_to_download_started.clone()))?;
     registry.register(Box::new(download_finished_to_arr_import.clone()))?;
     registry.register(Box::new(plex_to_notification.clone()))?;
     registry.register(Box::new(requests_total.clone()))?;
@@ -315,6 +324,30 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
             &[&media_type, &availability_class],
             &requested_at,
             row.get("first_available_at"),
+        )?;
+    }
+
+    for row in sqlx::query(
+        r#"
+        SELECT observed_at,
+               json_extract(payload_json, '$.episodes[0].airDateUtc') AS air_date_utc
+        FROM events
+        WHERE source = 'sonarr'
+          AND lower(event_type) = 'grab'
+          AND media_request_id IS NOT NULL
+          AND json_extract(payload_json, '$.episodes[0].airDateUtc') IS NOT NULL
+        "#,
+    )
+    .fetch_all(pool)
+    .await?
+    {
+        let observed_at: Option<String> = row.get("observed_at");
+        let air_date_utc: Option<String> = row.get("air_date_utc");
+        observe_duration_between(
+            &episode_air_to_download_started,
+            &["sonarr"],
+            air_date_utc,
+            observed_at,
         )?;
     }
 
