@@ -230,7 +230,7 @@
           "refId": "A"
         }
       ],
-      "title": "Recent unmatched events",
+      "title": "Recent non-request events",
       "type": "timeseries"
     },
     {
@@ -296,7 +296,7 @@
           "refId": "A"
         }
       ],
-      "title": "Lifecycle backlog by stage",
+      "title": "Historical missing-stage counts",
       "type": "timeseries"
     },
     {
@@ -350,58 +350,6 @@
       ],
       "title": "Plex availability observations",
       "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "berquo42m4r28a"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 12,
-        "y": 21
-      },
-      "id": 11,
-      "targets": [
-        {
-          "expr": "sum(media_request_lifecycle_unmatched_events)",
-          "legendFormat": "all unmatched",
-          "refId": "A"
-        }
-      ],
-      "title": "Unmatched backlog",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "berquo42m4r28a"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 18,
-        "y": 21
-      },
-      "id": 12,
-      "targets": [
-        {
-          "expr": "sum(media_request_lifecycle_failures_total)",
-          "legendFormat": "failures",
-          "refId": "A"
-        }
-      ],
-      "title": "Failure backlog",
-      "type": "stat"
     }
   ],
   "refresh": "30s",
@@ -421,5 +369,5 @@
   "timezone": "browser",
   "title": "Tread Media Lifecycle",
   "uid": "tread-lifecycle",
-  "version": 2
+  "version": 4
 }

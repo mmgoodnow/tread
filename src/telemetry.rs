@@ -127,13 +127,6 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         ),
         &["source", "event_type"],
     )?;
-    let failures_total = IntCounterVec::new(
-        Opts::new(
-            "media_request_lifecycle_failures_total",
-            "Lifecycle failures detected by the correlator.",
-        ),
-        &["stage", "reason"],
-    )?;
     let inflight = GaugeVec::new(
         Opts::new(
             "media_request_lifecycle_inflight",
@@ -167,7 +160,6 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
     registry.register(Box::new(plex_to_notification.clone()))?;
     registry.register(Box::new(requests_total.clone()))?;
     registry.register(Box::new(events_total.clone()))?;
-    registry.register(Box::new(failures_total.clone()))?;
     registry.register(Box::new(inflight.clone()))?;
     registry.register(Box::new(unmatched.clone()))?;
     registry.register(Box::new(unmatched_recent.clone()))?;
@@ -384,10 +376,6 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         }
     }
 
-    failures_total
-        .with_label_values(&["correlation", "unmatched_event"])
-        .inc_by(unmatched_total(pool).await?.try_into()?);
-
     let encoder = TextEncoder::new();
     let mut buffer = Vec::new();
     encoder.encode(&registry.gather(), &mut buffer)?;
@@ -430,12 +418,4 @@ fn observe_duration_between(
         histogram.with_label_values(labels).observe(seconds as f64);
     }
     Ok(())
-}
-
-async fn unmatched_total(pool: &SqlitePool) -> anyhow::Result<u64> {
-    let row = sqlx::query("SELECT COUNT(*) AS count FROM events WHERE media_request_id IS NULL")
-        .fetch_one(pool)
-        .await?;
-    let count: i64 = row.get("count");
-    Ok(count.try_into()?)
 }

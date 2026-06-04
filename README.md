@@ -96,12 +96,16 @@ Counters:
 
 - `media_requests_total{media_type}`
 - `media_request_events_total{source,event_type}`
-- `media_request_lifecycle_failures_total{stage,reason}`
 
 Gauges:
 
 - `media_request_lifecycle_inflight{stage}`
 - `media_request_lifecycle_unmatched_events{source}`
+- `media_request_lifecycle_unmatched_events_recent{source,window}`
+
+Unmatched events are uncorrelated stack activity, not failures by default. Media can be
+added through Sonarr, Radarr, Plex/Tautulli, or rTorrent without an Overseerr request,
+so these gauges are mainly a debugging signal.
 
 No titles, usernames, emails, request IDs, torrent hashes, or media IDs are used as metric labels.
 
