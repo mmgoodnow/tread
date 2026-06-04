@@ -36,12 +36,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, media_type, source) (media_request_to_plex_available_seconds_bucket))",
+          "expr": "sum by (media_type, source) (media_request_to_plex_available_seconds_sum) / sum by (media_type, source) (media_request_to_plex_available_seconds_count)",
           "legendFormat": "{{media_type}} {{source}}",
           "refId": "A"
         }
       ],
-      "title": "Request to Plex p95",
+      "title": "Request to Plex avg",
       "type": "stat"
     },
     {
@@ -73,12 +73,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, media_type, download_client) (media_request_to_download_started_seconds_bucket))",
+          "expr": "sum by (media_type, download_client) (media_request_to_download_started_seconds_sum) / sum by (media_type, download_client) (media_request_to_download_started_seconds_count)",
           "legendFormat": "{{media_type}} {{download_client}}",
           "refId": "A"
         }
       ],
-      "title": "Request to download start p95",
+      "title": "Request to download start avg",
       "type": "stat"
     },
     {
@@ -110,12 +110,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, media_type, arr) (media_request_download_finished_to_arr_import_seconds_bucket))",
+          "expr": "sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_sum) / sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_count)",
           "legendFormat": "{{media_type}} {{arr}}",
           "refId": "A"
         }
       ],
-      "title": "Download done to Arr import p95",
+      "title": "Download done to Arr import avg",
       "type": "stat"
     },
     {
@@ -147,12 +147,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, media_type) (media_request_plex_available_to_overseerr_notification_seconds_bucket))",
+          "expr": "sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_sum) / sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_count)",
           "legendFormat": "{{media_type}}",
           "refId": "A"
         }
       ],
-      "title": "Plex to Overseerr notification p95",
+      "title": "Plex to Overseerr notification avg",
       "type": "stat"
     },
     {
