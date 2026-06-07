@@ -129,9 +129,7 @@
         "uid": "berquo42m4r28a"
       },
       "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
+        "defaults": {},
         "overrides": []
       },
       "gridPos": {
@@ -142,23 +140,46 @@
       },
       "id": 4,
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
           "fields": "",
-          "values": false
-        }
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
-          "expr": "sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_sum) / sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_count)",
-          "legendFormat": "{{media_type}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "avg {{media_type}}",
+          "expr": "label_replace((sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_sum) / sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_count)), \"stage\", \"avg\", \"media_type\", \".*\")",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "samples {{media_type}}",
+          "expr": "label_replace((sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_count)), \"stage\", \"samples\", \"media_type\", \".*\")",
+          "refId": "B"
         }
       ],
-      "title": "Plex to Overseerr notification avg",
-      "type": "stat"
+      "title": "Plex -> Overseerr notification",
+      "type": "table"
     },
     {
       "datasource": {
@@ -179,36 +200,94 @@
       },
       "id": 5,
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
-          "expr": "sum by (media_type, source) (media_request_to_plex_available_seconds_sum) / sum by (media_type, source) (media_request_to_plex_available_seconds_count)",
-          "legendFormat": "request to plex {{media_type}} {{source}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "request -> plex {{media_type}} {{source}}",
+          "expr": "label_replace((sum by (media_type, source) (media_request_to_plex_available_seconds_sum) / sum by (media_type, source) (media_request_to_plex_available_seconds_count)), \"stage\", \"request -> plex\", \"media_type\", \".*\")",
           "refId": "A"
         },
         {
-          "expr": "sum by (media_type, download_client) (media_request_to_download_finished_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_finished_seconds_count{media_type=\"movie\"})",
-          "legendFormat": "request to download done movie {{download_client}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "request -> download start movie {{download_client}}",
+          "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_started_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_started_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download start\", \"media_type\", \".*\")",
           "refId": "B"
         },
         {
-          "expr": "sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_sum) / sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_count)",
-          "legendFormat": "download done to arr {{media_type}} {{arr}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "episode air -> download start series {{source}}",
+          "expr": "label_replace((sum by (source) (media_episode_air_to_download_started_seconds_sum) / sum by (source) (media_episode_air_to_download_started_seconds_count)), \"stage\", \"episode air -> download start\", \"source\", \".*\")",
           "refId": "C"
         },
         {
-          "expr": "sum by (source) (media_episode_air_to_download_started_seconds_sum) / sum by (source) (media_episode_air_to_download_started_seconds_count)",
-          "legendFormat": "air to download start series {{source}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "request -> download done movie {{download_client}}",
+          "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_finished_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_finished_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download done\", \"media_type\", \".*\")",
           "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "download done -> arr import {{media_type}} {{arr}}",
+          "expr": "label_replace((sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_sum) / sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_count)), \"stage\", \"download done -> arr import\", \"media_type\", \".*\")",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "plex -> overseerr notification {{media_type}}",
+          "expr": "label_replace((sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_sum) / sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_count)), \"stage\", \"plex -> overseerr notification\", \"media_type\", \".*\")",
+          "refId": "F"
         }
       ],
-      "title": "Average lifecycle durations",
-      "type": "timeseries"
+      "title": "Lifecycle averages (all history)",
+      "type": "table"
     },
     {
       "datasource": {
@@ -227,21 +306,94 @@
       },
       "id": 6,
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        }
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
       },
+      "pluginVersion": "12.3.0",
       "targets": [
         {
-          "expr": "media_request_lifecycle_unmatched_events_recent",
-          "legendFormat": "{{source}} {{window}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "request -> plex {{media_type}} {{source}}",
+          "expr": "label_replace((sum by (media_type, source) (media_request_to_plex_available_seconds_count)), \"stage\", \"request -> plex\", \"media_type\", \".*\")",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "request -> download start movie {{download_client}}",
+          "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_started_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download start\", \"media_type\", \".*\")",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "episode air -> download start series {{source}}",
+          "expr": "label_replace((sum by (source) (media_episode_air_to_download_started_seconds_count)), \"stage\", \"episode air -> download start\", \"source\", \".*\")",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "request -> download done movie {{download_client}}",
+          "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_finished_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download done\", \"media_type\", \".*\")",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "download done -> arr import {{media_type}} {{arr}}",
+          "expr": "label_replace((sum by (media_type, arr) (media_request_download_finished_to_arr_import_seconds_count)), \"stage\", \"download done -> arr import\", \"media_type\", \".*\")",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "berquo42m4r28a"
+          },
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "plex -> overseerr notification {{media_type}}",
+          "expr": "label_replace((sum by (media_type) (media_request_plex_available_to_overseerr_notification_seconds_count)), \"stage\", \"plex -> overseerr notification\", \"media_type\", \".*\")",
+          "refId": "F"
         }
       ],
-      "title": "Recent non-request events",
-      "type": "timeseries"
+      "title": "Lifecycle sample counts",
+      "type": "table"
     },
     {
       "datasource": {
@@ -301,12 +453,12 @@
       },
       "targets": [
         {
-          "expr": "media_request_lifecycle_inflight",
-          "legendFormat": "{{stage}}",
+          "expr": "media_request_lifecycle_unmatched_events_recent",
+          "legendFormat": "{{source}} {{window}}",
           "refId": "A"
         }
       ],
-      "title": "Historical missing-stage counts",
+      "title": "Recent non-request events",
       "type": "timeseries"
     },
     {
@@ -379,5 +531,5 @@
   "timezone": "browser",
   "title": "Tread Media Lifecycle",
   "uid": "tread-lifecycle",
-  "version": 5
+  "version": 6
 }
