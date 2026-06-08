@@ -207,23 +207,8 @@
                             "type": "string"
                           },
                           {
-                            "selector": "request_to_arr_grab_seconds",
-                            "text": "snatch",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "arr_grab_to_download_started_seconds",
-                            "text": "download start",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "download_started_to_download_finished_seconds",
-                            "text": "download finish",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "download_finished_to_arr_import_seconds",
-                            "text": "import",
+                            "selector": "plex_available_to_notification_seconds",
+                            "text": "email",
                             "type": "number"
                           },
                           {
@@ -232,8 +217,23 @@
                             "type": "number"
                           },
                           {
-                            "selector": "plex_available_to_notification_seconds",
-                            "text": "email",
+                            "selector": "download_finished_to_arr_import_seconds",
+                            "text": "import",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "download_started_to_download_finished_seconds",
+                            "text": "download finish",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "arr_grab_to_download_started_seconds",
+                            "text": "download start",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "request_to_arr_grab_seconds",
+                            "text": "snatch",
                             "type": "number"
                           }
                         ],
