@@ -117,11 +117,33 @@ pub async fn recent_software_delay_rows(
                 mri.overseerr_notification_sent_at AS notification_sent_at
             FROM media_request_items mri
             JOIN media_requests mr ON mr.id = mri.media_request_id
-            WHERE mri.download_finished_at IS NOT NULL
-               OR mri.radarr_imported_at IS NOT NULL
-               OR mri.sonarr_imported_at IS NOT NULL
-               OR mri.plex_available_at IS NOT NULL
-               OR mri.overseerr_notification_sent_at IS NOT NULL
+            WHERE (
+                mri.download_finished_at IS NOT NULL
+                OR mri.radarr_imported_at IS NOT NULL
+                OR mri.sonarr_imported_at IS NOT NULL
+                OR mri.plex_available_at IS NOT NULL
+                OR mri.overseerr_notification_sent_at IS NOT NULL
+            )
+              AND NOT (
+                mri.season_number IS NULL
+                AND mri.episode_number IS NULL
+                AND EXISTS (
+                    SELECT 1
+                    FROM media_request_items child
+                    WHERE child.media_request_id = mri.media_request_id
+                      AND (
+                        child.season_number IS NOT NULL
+                        OR child.episode_number IS NOT NULL
+                      )
+                      AND (
+                        child.download_finished_at IS NOT NULL
+                        OR child.radarr_imported_at IS NOT NULL
+                        OR child.sonarr_imported_at IS NOT NULL
+                        OR child.plex_available_at IS NOT NULL
+                        OR child.overseerr_notification_sent_at IS NOT NULL
+                      )
+                )
+              )
         )
         SELECT
             *,

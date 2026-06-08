@@ -158,6 +158,75 @@ async fn recent_software_delay_rows_break_down_avoidable_lag() {
 }
 
 #[tokio::test]
+async fn recent_software_delay_rows_skip_parent_when_specific_items_exist() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(552),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(250758),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("Rafa".to_string()),
+                year: Some(2026),
+                season_number: None,
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![
+                MediaRequestItemInput {
+                    season_number: None,
+                    episode_number: None,
+                    title: None,
+                    air_date: None,
+                    availability_class: AvailabilityClass::Existing,
+                },
+                MediaRequestItemInput {
+                    season_number: Some(1),
+                    episode_number: None,
+                    title: None,
+                    air_date: None,
+                    availability_class: AvailabilityClass::Existing,
+                },
+            ],
+            title: "Rafa".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 7, 7, 19, 42).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET download_finished_at = '2026-06-07T07:42:32+00:00',
+            sonarr_imported_at = '2026-06-07T07:42:32+00:00',
+            plex_available_at = '2026-06-07T07:42:37+00:00',
+            overseerr_notification_sent_at = '2026-06-07T10:15:47+00:00'
+        WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = 552)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Rafa");
+    assert_eq!(rows[0].season_number, Some(1));
+    assert_eq!(rows[0].episode_number, None);
+}
+
+#[tokio::test]
 async fn recent_software_delay_rows_expose_missing_lifecycle_stages() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
