@@ -9,6 +9,274 @@
   "panels": [
     {
       "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "tread-api"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Title"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 11,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.7,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "normal",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "Title",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "13.0.2",
+      "targets": [
+        {
+          "columns": [
+            {
+              "selector": "title",
+              "text": "Title",
+              "type": "string"
+            },
+            {
+              "selector": "media_type",
+              "text": "Type",
+              "type": "string"
+            },
+            {
+              "selector": "season_number",
+              "text": "Season",
+              "type": "number"
+            },
+            {
+              "selector": "download_finished_to_arr_import_seconds",
+              "text": "Download done -> Arr",
+              "type": "number"
+            },
+            {
+              "selector": "arr_import_to_plex_available_seconds",
+              "text": "Arr import -> Plex",
+              "type": "number"
+            },
+            {
+              "selector": "plex_available_to_notification_seconds",
+              "text": "Plex -> notification",
+              "type": "number"
+            },
+            {
+              "selector": "total_software_delay_seconds",
+              "text": "Total software delay",
+              "type": "number"
+            }
+          ],
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "tread-api"
+          },
+          "format": "table",
+          "method": "GET",
+          "parser": "backend",
+          "queryType": "infinity",
+          "refId": "A",
+          "root_selector": "$.rows",
+          "source": "url",
+          "type": "json",
+          "url": "http://tread/api/software-delay/recent?limit=25",
+          "url_options": {
+            "method": "GET",
+            "params": []
+          }
+        }
+      ],
+      "title": "Software-induced delay by recent item",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "tread-api"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Title"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Type"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Season"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "13.0.2",
+      "targets": [
+        {
+          "columns": [
+            {
+              "selector": "title",
+              "text": "Title",
+              "type": "string"
+            },
+            {
+              "selector": "media_type",
+              "text": "Type",
+              "type": "string"
+            },
+            {
+              "selector": "season_number",
+              "text": "Season",
+              "type": "number"
+            },
+            {
+              "selector": "download_finished_to_arr_import_seconds",
+              "text": "Download done -> Arr",
+              "type": "number"
+            },
+            {
+              "selector": "arr_import_to_plex_available_seconds",
+              "text": "Arr import -> Plex",
+              "type": "number"
+            },
+            {
+              "selector": "plex_available_to_notification_seconds",
+              "text": "Plex -> notification",
+              "type": "number"
+            },
+            {
+              "selector": "total_software_delay_seconds",
+              "text": "Total software delay",
+              "type": "number"
+            }
+          ],
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "tread-api"
+          },
+          "format": "table",
+          "method": "GET",
+          "parser": "backend",
+          "queryType": "infinity",
+          "refId": "A",
+          "root_selector": "$.rows",
+          "source": "url",
+          "type": "json",
+          "url": "http://tread/api/software-delay/recent?limit=25",
+          "url_options": {
+            "method": "GET",
+            "params": []
+          }
+        }
+      ],
+      "title": "Recent lifecycle rows from Tread SQLite",
+      "type": "table"
+    },
+    {
+      "datasource": {
         "type": "prometheus",
         "uid": "berquo42m4r28a"
       },
@@ -22,7 +290,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 0
+        "y": 16
       },
       "id": 1,
       "options": {
@@ -59,7 +327,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 0
+        "y": 16
       },
       "id": 2,
       "options": {
@@ -101,7 +369,7 @@
         "h": 5,
         "w": 6,
         "x": 12,
-        "y": 0
+        "y": 16
       },
       "id": 3,
       "options": {
@@ -136,7 +404,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 0
+        "y": 16
       },
       "id": 4,
       "options": {
@@ -196,7 +464,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 21
       },
       "id": 5,
       "options": {
@@ -302,7 +570,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 21
       },
       "id": 6,
       "options": {
@@ -408,7 +676,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 13
+        "y": 29
       },
       "id": 7,
       "options": {
@@ -441,7 +709,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 13
+        "y": 29
       },
       "id": 8,
       "options": {
@@ -474,7 +742,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 21
+        "y": 37
       },
       "id": 9,
       "targets": [
@@ -500,7 +768,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 21
+        "y": 37
       },
       "id": 10,
       "targets": [
@@ -531,5 +799,5 @@
   "timezone": "browser",
   "title": "Tread Media Lifecycle",
   "uid": "tread-lifecycle",
-  "version": 6
+  "version": 7
 }
