@@ -889,9 +889,12 @@ async fn find_by_identifier(
             if identity_conflicts_with_request(pool, media_request_id, identity).await? {
                 continue;
             }
-            let media_request_item_id = row
-                .get::<Option<i64>, _>("media_request_item_id")
-                .or(find_item_for_request(pool, media_request_id, identity).await?);
+            let media_request_item_id = if event_requires_specific_item(identity) {
+                find_item_for_request(pool, media_request_id, identity).await?
+            } else {
+                row.get::<Option<i64>, _>("media_request_item_id")
+                    .or(find_item_for_request(pool, media_request_id, identity).await?)
+            };
             if event_requires_specific_item(identity) && media_request_item_id.is_none() {
                 return Ok(None);
             }
@@ -1030,6 +1033,19 @@ async fn find_item_for_request(
         if let Some(row) = row {
             return Ok(Some(row.get("id")));
         }
+
+        if identity.season_number.is_some() {
+            if let Some(row) = create_episode_item_for_season_request(
+                pool,
+                media_request_id,
+                identity.season_number,
+                episode_number,
+            )
+            .await?
+            {
+                return Ok(Some(row));
+            }
+        }
     }
 
     if let Some(season_number) = identity.season_number {
@@ -1086,6 +1102,57 @@ async fn find_item_for_request(
     };
 
     Ok(row.map(|row| row.get("id")))
+}
+
+async fn create_episode_item_for_season_request(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    season_number: Option<i64>,
+    episode_number: i64,
+) -> anyhow::Result<Option<i64>> {
+    let Some(season_number) = season_number else {
+        return Ok(None);
+    };
+
+    let Some(request) = sqlx::query(
+        r#"
+        SELECT media_type, requested_at
+        FROM media_requests
+        WHERE id = ?
+        "#,
+    )
+    .bind(media_request_id)
+    .fetch_optional(pool)
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let row = sqlx::query(
+        r#"
+        INSERT INTO media_request_items (
+            media_request_id, media_type, season_number, episode_number, requested_at,
+            availability_class, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'unknown', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ON CONFLICT(
+            media_request_id,
+            COALESCE(season_number, -1),
+            COALESCE(episode_number, -1)
+        ) DO UPDATE SET
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        RETURNING id
+        "#,
+    )
+    .bind(media_request_id)
+    .bind(request.get::<String, _>("media_type"))
+    .bind(season_number)
+    .bind(episode_number)
+    .bind(request.get::<String, _>("requested_at"))
+    .fetch_one(pool)
+    .await?;
+
+    Ok(Some(row.get("id")))
 }
 
 pub fn parse_datetime_or_now(value: Option<&Value>) -> DateTime<Utc> {

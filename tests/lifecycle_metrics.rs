@@ -279,6 +279,149 @@ async fn recent_software_delay_rows_clamp_subsecond_arr_to_plex_skew() {
 }
 
 #[tokio::test]
+async fn episode_events_for_season_request_do_not_share_lifecycle_columns() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(551),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(12345),
+                tvdb_id: Some(67890),
+                imdb_id: None,
+                title: Some("MasterChef".to_string()),
+                year: Some(2010),
+                season_number: Some(16),
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(16),
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Unknown,
+            }],
+            title: "MasterChef".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    ingest_event(
+        &pool,
+        generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "episode",
+                "grandparent_title": "MasterChef",
+                "grandparent_guids": ["tmdb://12345", "tvdb://67890"],
+                "season_number": 16,
+                "episode_number": 5,
+                "rating_key": "episode-5",
+                "added_at": "2026-05-21T07:27:21Z"
+            }),
+        ),
+    )
+    .await
+    .expect("episode 5 tautulli ingest");
+
+    ingest_event(
+        &pool,
+        arr_event(
+            EventSource::Sonarr,
+            json!({
+                "eventType": "Download",
+                "series": {
+                    "title": "MasterChef",
+                    "tvdbId": 67890,
+                    "tmdbId": 12345
+                },
+                "episodes": [{
+                    "seasonNumber": 16,
+                    "episodeNumber": 8,
+                    "title": "World Cup Cookoff"
+                }],
+                "episodeFile": {
+                    "id": 67627,
+                    "dateAdded": "2026-06-04T07:15:22.6277335Z",
+                    "relativePath": "Season 16/MasterChef - S16E08.mkv"
+                },
+                "downloadId": "download-8",
+                "downloadClient": "rTorrent",
+                "observed_at": "2026-06-04T07:15:23Z"
+            }),
+        ),
+    )
+    .await
+    .expect("episode 8 sonarr ingest");
+
+    ingest_event(
+        &pool,
+        generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "episode",
+                "grandparent_title": "MasterChef",
+                "grandparent_guids": ["tmdb://12345", "tvdb://67890"],
+                "season_number": 16,
+                "episode_number": 8,
+                "rating_key": "episode-8",
+                "added_at": "2026-06-04T07:15:27Z"
+            }),
+        ),
+    )
+    .await
+    .expect("episode 8 tautulli ingest");
+
+    let rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+    let season_row = sqlx::query(
+        r#"
+        SELECT sonarr_imported_at, plex_available_at
+        FROM media_request_items
+        WHERE season_number = 16
+          AND episode_number IS NULL
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("season row");
+    assert_eq!(
+        season_row
+            .get::<Option<String>, _>("sonarr_imported_at")
+            .as_deref(),
+        None
+    );
+    assert_eq!(
+        season_row
+            .get::<Option<String>, _>("plex_available_at")
+            .as_deref(),
+        None
+    );
+
+    let episode_8_row = rows
+        .iter()
+        .find(|row| row.season_number == Some(16) && row.episode_number == Some(8))
+        .expect("episode 8 row");
+    assert_eq!(
+        episode_8_row.arr_import_to_plex_available_seconds,
+        Some(4.0)
+    );
+}
+
+#[tokio::test]
 async fn radarr_download_marks_download_finished() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
