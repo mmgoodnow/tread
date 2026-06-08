@@ -90,6 +90,67 @@ async fn request_upsert_reconciles_prior_unmatched_radarr_grab() {
 }
 
 #[tokio::test]
+async fn recent_software_delay_rows_break_down_avoidable_lag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(548),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(11368),
+                tvdb_id: None,
+                imdb_id: Some("tt0086979".to_string()),
+                title: Some("Blood Simple".to_string()),
+                year: Some(1985),
+                season_number: None,
+                episode_number: None,
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "Blood Simple".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 4, 44, 59).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET download_finished_at = '2026-06-02T04:53:00+00:00',
+            radarr_imported_at = '2026-06-02T04:54:30+00:00',
+            plex_available_at = '2026-06-02T04:55:00+00:00',
+            overseerr_notification_sent_at = '2026-06-02T04:55:45+00:00'
+        WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = 548)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+    let row = rows.first().expect("delay row");
+
+    assert_eq!(row.title, "Blood Simple");
+    assert_eq!(row.download_finished_to_arr_import_seconds, Some(90.0));
+    assert_eq!(row.arr_import_to_plex_available_seconds, Some(30.0));
+    assert_eq!(row.plex_available_to_notification_seconds, Some(45.0));
+    assert_eq!(row.total_software_delay_seconds, 165.0);
+}
+
+#[tokio::test]
 async fn radarr_download_marks_download_finished() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());

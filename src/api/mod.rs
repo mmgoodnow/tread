@@ -1,12 +1,13 @@
 use axum::{
     Form, Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 
 use crate::{
     clients::webhook::{
@@ -27,6 +28,7 @@ pub fn router(pool: SqlitePool) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
+        .route("/api/software-delay/recent", get(recent_software_delay))
         .route("/webhooks/overseerr", post(overseerr_webhook))
         .route("/webhooks/sonarr", post(sonarr_webhook))
         .route("/webhooks/radarr", post(radarr_webhook))
@@ -47,6 +49,151 @@ async fn metrics(State(state): State<AppState>) -> Result<Response, ApiError> {
         body,
     )
         .into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecentSoftwareDelayQuery {
+    #[serde(default = "default_recent_limit")]
+    pub limit: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecentSoftwareDelayRow {
+    pub item_id: i64,
+    pub media_request_id: i64,
+    pub overseerr_request_id: Option<i64>,
+    pub media_type: String,
+    pub title: String,
+    pub season_number: Option<i64>,
+    pub episode_number: Option<i64>,
+    pub requested_at: String,
+    pub download_finished_at: Option<String>,
+    pub arr_imported_at: Option<String>,
+    pub plex_available_at: Option<String>,
+    pub notification_sent_at: Option<String>,
+    pub download_finished_to_arr_import_seconds: Option<f64>,
+    pub arr_import_to_plex_available_seconds: Option<f64>,
+    pub plex_available_to_notification_seconds: Option<f64>,
+    pub total_software_delay_seconds: f64,
+}
+
+fn default_recent_limit() -> i64 {
+    25
+}
+
+async fn recent_software_delay(
+    State(state): State<AppState>,
+    Query(query): Query<RecentSoftwareDelayQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let limit = query.limit.clamp(1, 200);
+    let rows = recent_software_delay_rows(&state.pool, limit).await?;
+    Ok(Json(json!({ "rows": rows })))
+}
+
+pub async fn recent_software_delay_rows(
+    pool: &SqlitePool,
+    limit: i64,
+) -> anyhow::Result<Vec<RecentSoftwareDelayRow>> {
+    let rows = sqlx::query(
+        r#"
+        WITH lifecycle AS (
+            SELECT
+                mri.id AS item_id,
+                mr.id AS media_request_id,
+                mr.overseerr_request_id,
+                mri.media_type,
+                COALESCE(mri.title, mr.title) AS title,
+                mri.season_number,
+                mri.episode_number,
+                mri.requested_at,
+                mri.download_finished_at,
+                COALESCE(mri.radarr_imported_at, mri.sonarr_imported_at) AS arr_imported_at,
+                mri.plex_available_at,
+                mri.overseerr_notification_sent_at AS notification_sent_at
+            FROM media_request_items mri
+            JOIN media_requests mr ON mr.id = mri.media_request_id
+            WHERE mri.download_finished_at IS NOT NULL
+               OR mri.radarr_imported_at IS NOT NULL
+               OR mri.sonarr_imported_at IS NOT NULL
+               OR mri.plex_available_at IS NOT NULL
+               OR mri.overseerr_notification_sent_at IS NOT NULL
+        )
+        SELECT
+            *,
+            CASE
+                WHEN download_finished_at IS NOT NULL
+                 AND arr_imported_at IS NOT NULL
+                 AND julianday(arr_imported_at) >= julianday(download_finished_at)
+                THEN (julianday(arr_imported_at) - julianday(download_finished_at)) * 86400.0
+            END AS download_finished_to_arr_import_seconds,
+            CASE
+                WHEN arr_imported_at IS NOT NULL
+                 AND plex_available_at IS NOT NULL
+                 AND julianday(plex_available_at) >= julianday(arr_imported_at)
+                THEN (julianday(plex_available_at) - julianday(arr_imported_at)) * 86400.0
+            END AS arr_import_to_plex_available_seconds,
+            CASE
+                WHEN plex_available_at IS NOT NULL
+                 AND notification_sent_at IS NOT NULL
+                 AND julianday(notification_sent_at) >= julianday(plex_available_at)
+                THEN (julianday(notification_sent_at) - julianday(plex_available_at)) * 86400.0
+            END AS plex_available_to_notification_seconds
+        FROM lifecycle
+        ORDER BY COALESCE(notification_sent_at, plex_available_at, arr_imported_at, download_finished_at, requested_at) DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(limit.clamp(1, 200))
+    .fetch_all(pool)
+    .await?;
+
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            let download_finished_to_arr_import_seconds = row
+                .get::<Option<f64>, _>("download_finished_to_arr_import_seconds")
+                .map(clean_seconds);
+            let arr_import_to_plex_available_seconds = row
+                .get::<Option<f64>, _>("arr_import_to_plex_available_seconds")
+                .map(clean_seconds);
+            let plex_available_to_notification_seconds = row
+                .get::<Option<f64>, _>("plex_available_to_notification_seconds")
+                .map(clean_seconds);
+            let total_software_delay_seconds = [
+                download_finished_to_arr_import_seconds,
+                arr_import_to_plex_available_seconds,
+                plex_available_to_notification_seconds,
+            ]
+            .into_iter()
+            .flatten()
+            .sum();
+
+            RecentSoftwareDelayRow {
+                item_id: row.get("item_id"),
+                media_request_id: row.get("media_request_id"),
+                overseerr_request_id: row.get("overseerr_request_id"),
+                media_type: row.get("media_type"),
+                title: row.get("title"),
+                season_number: row.get("season_number"),
+                episode_number: row.get("episode_number"),
+                requested_at: row.get("requested_at"),
+                download_finished_at: row.get("download_finished_at"),
+                arr_imported_at: row.get("arr_imported_at"),
+                plex_available_at: row.get("plex_available_at"),
+                notification_sent_at: row.get("notification_sent_at"),
+                download_finished_to_arr_import_seconds,
+                arr_import_to_plex_available_seconds,
+                plex_available_to_notification_seconds,
+                total_software_delay_seconds,
+            }
+        })
+        .collect();
+
+    Ok(rows)
+}
+
+fn clean_seconds(value: f64) -> f64 {
+    value.max(0.0).round()
 }
 
 async fn overseerr_webhook(
