@@ -55,6 +55,8 @@ async fn metrics(State(state): State<AppState>) -> Result<Response, ApiError> {
 pub struct RecentSoftwareDelayQuery {
     #[serde(default = "default_recent_limit")]
     pub limit: i64,
+    #[serde(default)]
+    pub measurable_only: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,6 +66,7 @@ pub struct RecentSoftwareDelayRow {
     pub overseerr_request_id: Option<i64>,
     pub media_type: String,
     pub title: String,
+    pub display_title: String,
     pub season_number: Option<i64>,
     pub episode_number: Option<i64>,
     pub requested_at: String,
@@ -91,13 +94,22 @@ async fn recent_software_delay(
     Query(query): Query<RecentSoftwareDelayQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let limit = query.limit.clamp(1, 200);
-    let rows = recent_software_delay_rows(&state.pool, limit).await?;
+    let rows =
+        recent_software_delay_rows_with_options(&state.pool, limit, query.measurable_only).await?;
     Ok(Json(json!({ "rows": rows })))
 }
 
 pub async fn recent_software_delay_rows(
     pool: &SqlitePool,
     limit: i64,
+) -> anyhow::Result<Vec<RecentSoftwareDelayRow>> {
+    recent_software_delay_rows_with_options(pool, limit, false).await
+}
+
+pub async fn recent_software_delay_rows_with_options(
+    pool: &SqlitePool,
+    limit: i64,
+    measurable_only: bool,
 ) -> anyhow::Result<Vec<RecentSoftwareDelayRow>> {
     let rows = sqlx::query(
         r#"
@@ -144,8 +156,9 @@ pub async fn recent_software_delay_rows(
                       )
                 )
               )
-        )
-        SELECT
+        ),
+        measured AS (
+            SELECT
             *,
             CASE
                 WHEN download_finished_at IS NOT NULL
@@ -165,11 +178,19 @@ pub async fn recent_software_delay_rows(
                  AND julianday(notification_sent_at) >= julianday(plex_available_at)
                 THEN (julianday(notification_sent_at) - julianday(plex_available_at)) * 86400.0
             END AS plex_available_to_notification_seconds
-        FROM lifecycle
+            FROM lifecycle
+        )
+        SELECT *
+        FROM measured
+        WHERE ? = 0
+           OR download_finished_to_arr_import_seconds IS NOT NULL
+           OR arr_import_to_plex_available_seconds IS NOT NULL
+           OR plex_available_to_notification_seconds IS NOT NULL
         ORDER BY COALESCE(notification_sent_at, plex_available_at, arr_imported_at, download_finished_at, requested_at) DESC
         LIMIT ?
         "#,
     )
+    .bind(if measurable_only { 1_i64 } else { 0_i64 })
     .bind(limit.clamp(1, 200))
     .fetch_all(pool)
     .await?;
@@ -210,15 +231,19 @@ pub async fn recent_software_delay_rows(
                 .filter_map(|(stage, present)| (!present).then_some(stage))
                 .collect::<Vec<_>>();
             let observed_stage_count = expected_stage_count - missing_stages.len() as i64;
+            let title: String = row.get("title");
+            let season_number = row.get("season_number");
+            let episode_number = row.get("episode_number");
 
             RecentSoftwareDelayRow {
                 item_id: row.get("item_id"),
                 media_request_id: row.get("media_request_id"),
                 overseerr_request_id: row.get("overseerr_request_id"),
                 media_type: row.get("media_type"),
-                title: row.get("title"),
-                season_number: row.get("season_number"),
-                episode_number: row.get("episode_number"),
+                display_title: software_delay_display_title(&title, season_number, episode_number),
+                title,
+                season_number,
+                episode_number,
                 requested_at: row.get("requested_at"),
                 download_finished_at,
                 arr_imported_at,
@@ -238,6 +263,18 @@ pub async fn recent_software_delay_rows(
         .collect();
 
     Ok(rows)
+}
+
+fn software_delay_display_title(
+    title: &str,
+    season_number: Option<i64>,
+    episode_number: Option<i64>,
+) -> String {
+    match (season_number, episode_number) {
+        (Some(season), Some(episode)) => format!("{title} S{season:02}E{episode:02}"),
+        (Some(season), None) => format!("{title} S{season:02}"),
+        _ => title.to_string(),
+    }
 }
 
 fn clean_seconds(value: f64) -> f64 {

@@ -197,7 +197,7 @@
                       "spec": {
                         "columns": [
                           {
-                            "selector": "title",
+                            "selector": "display_title",
                             "text": "Title",
                             "type": "string"
                           },
@@ -229,7 +229,7 @@
                         "root_selector": "$.rows",
                         "source": "url",
                         "type": "json",
-                        "url": "http://tread/api/software-delay/recent?limit=12",
+                        "url": "http://tread/api/software-delay/recent?limit=12&measurable_only=true",
                         "url_options": {
                           "method": "GET",
                           "params": []
@@ -360,7 +360,7 @@
                       "spec": {
                         "columns": [
                           {
-                            "selector": "title",
+                            "selector": "display_title",
                             "text": "Title",
                             "type": "string"
                           },

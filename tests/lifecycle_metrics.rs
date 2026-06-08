@@ -222,6 +222,7 @@ async fn recent_software_delay_rows_skip_parent_when_specific_items_exist() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].title, "Rafa");
+    assert_eq!(rows[0].display_title, "Rafa S01");
     assert_eq!(rows[0].season_number, Some(1));
     assert_eq!(rows[0].episode_number, None);
 }
@@ -484,10 +485,71 @@ async fn episode_events_for_season_request_do_not_share_lifecycle_columns() {
         .iter()
         .find(|row| row.season_number == Some(16) && row.episode_number == Some(8))
         .expect("episode 8 row");
+    assert_eq!(episode_8_row.display_title, "MasterChef S16E08");
     assert_eq!(
         episode_8_row.arr_import_to_plex_available_seconds,
         Some(4.0)
     );
+}
+
+#[tokio::test]
+async fn recent_software_delay_rows_can_filter_empty_chart_rows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(553),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(37854),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("One Piece".to_string()),
+                year: Some(2023),
+                season_number: Some(23),
+                episode_number: Some(10),
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(23),
+                episode_number: Some(10),
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "One Piece".to_string(),
+            requested_by: None,
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 7, 7, 19, 42).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET download_finished_at = '2026-06-07T07:42:32+00:00'
+        WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = 553)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let all_rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+    assert_eq!(all_rows.len(), 1);
+    assert_eq!(all_rows[0].display_title, "One Piece S23E10");
+    assert_eq!(all_rows[0].known_software_delay_seconds, 0.0);
+
+    let measurable_rows = tread::api::recent_software_delay_rows_with_options(&pool, 10, true)
+        .await
+        .expect("measurable delay rows");
+    assert!(measurable_rows.is_empty());
 }
 
 #[tokio::test]
