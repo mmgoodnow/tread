@@ -207,6 +207,16 @@
                             "type": "string"
                           },
                           {
+                            "selector": "request_to_arr_grab_seconds",
+                            "text": "Request/air -> Arr grab",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "arr_grab_to_download_started_seconds",
+                            "text": "Arr grab -> download start",
+                            "type": "number"
+                          },
+                          {
                             "selector": "download_finished_to_arr_import_seconds",
                             "text": "Download done -> Arr",
                             "type": "number"
@@ -372,6 +382,16 @@
                           {
                             "selector": "season_number",
                             "text": "Season",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "request_to_arr_grab_seconds",
+                            "text": "Request/air -> Arr grab",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "arr_grab_to_download_started_seconds",
+                            "text": "Arr grab -> download start",
                             "type": "number"
                           },
                           {

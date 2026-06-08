@@ -129,7 +129,9 @@ async fn recent_software_delay_rows_break_down_avoidable_lag() {
     sqlx::query(
         r#"
         UPDATE media_request_items
-        SET download_finished_at = '2026-06-02T04:53:00+00:00',
+        SET radarr_grabbed_at = '2026-06-02T04:45:09+00:00',
+            download_started_at = '2026-06-02T04:45:12+00:00',
+            download_finished_at = '2026-06-02T04:53:00+00:00',
             radarr_imported_at = '2026-06-02T04:54:30+00:00',
             plex_available_at = '2026-06-02T04:55:00+00:00',
             overseerr_notification_sent_at = '2026-06-02T04:55:45+00:00'
@@ -146,13 +148,15 @@ async fn recent_software_delay_rows_break_down_avoidable_lag() {
     let row = rows.first().expect("delay row");
 
     assert_eq!(row.title, "Blood Simple");
+    assert_eq!(row.request_to_arr_grab_seconds, Some(10.0));
+    assert_eq!(row.arr_grab_to_download_started_seconds, Some(3.0));
     assert_eq!(row.download_finished_to_arr_import_seconds, Some(90.0));
     assert_eq!(row.arr_import_to_plex_available_seconds, Some(30.0));
     assert_eq!(row.plex_available_to_notification_seconds, Some(45.0));
-    assert_eq!(row.known_software_delay_seconds, 165.0);
-    assert_eq!(row.total_software_delay_seconds, 165.0);
-    assert_eq!(row.observed_stage_count, 4);
-    assert_eq!(row.expected_stage_count, 4);
+    assert_eq!(row.known_software_delay_seconds, 178.0);
+    assert_eq!(row.total_software_delay_seconds, 178.0);
+    assert_eq!(row.observed_stage_count, 6);
+    assert_eq!(row.expected_stage_count, 6);
     assert!(row.lifecycle_complete);
     assert!(row.missing_stages.is_empty());
 }
@@ -282,11 +286,16 @@ async fn recent_software_delay_rows_expose_missing_lifecycle_stages() {
 
     assert_eq!(row.title, "Partial Movie");
     assert_eq!(row.observed_stage_count, 2);
-    assert_eq!(row.expected_stage_count, 4);
+    assert_eq!(row.expected_stage_count, 6);
     assert!(!row.lifecycle_complete);
     assert_eq!(
         row.missing_stages,
-        vec!["arr_imported", "notification_sent"]
+        vec![
+            "arr_grabbed",
+            "download_started",
+            "arr_imported",
+            "notification_sent"
+        ]
     );
     assert_eq!(row.known_software_delay_seconds, 0.0);
 }
@@ -550,6 +559,66 @@ async fn recent_software_delay_rows_can_filter_empty_chart_rows() {
         .await
         .expect("measurable delay rows");
     assert!(measurable_rows.is_empty());
+}
+
+#[tokio::test]
+async fn recent_software_delay_rows_use_air_date_for_future_airing_grab_delay() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(554),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(12345),
+                tvdb_id: Some(67890),
+                imdb_id: None,
+                title: Some("MasterChef".to_string()),
+                year: Some(2010),
+                season_number: Some(16),
+                episode_number: Some(9),
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(16),
+                episode_number: Some(9),
+                title: None,
+                air_date: Some(Utc.with_ymd_and_hms(2026, 6, 5, 1, 0, 0).unwrap()),
+                availability_class: AvailabilityClass::FutureAiring,
+            }],
+            title: "MasterChef".to_string(),
+            requested_by: None,
+            requested_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET sonarr_grabbed_at = '2026-06-05T01:02:00+00:00',
+            download_started_at = '2026-06-05T01:02:05+00:00'
+        WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = 554)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+    let row = rows.first().expect("delay row");
+
+    assert_eq!(row.display_title, "MasterChef S16E09");
+    assert_eq!(row.effective_start_at, "2026-06-05T01:00:00+00:00");
+    assert_eq!(row.request_to_arr_grab_seconds, Some(120.0));
+    assert_eq!(row.arr_grab_to_download_started_seconds, Some(5.0));
+    assert_eq!(row.known_software_delay_seconds, 125.0);
 }
 
 #[tokio::test]

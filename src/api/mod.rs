@@ -70,10 +70,15 @@ pub struct RecentSoftwareDelayRow {
     pub season_number: Option<i64>,
     pub episode_number: Option<i64>,
     pub requested_at: String,
+    pub effective_start_at: String,
+    pub arr_grabbed_at: Option<String>,
+    pub download_started_at: Option<String>,
     pub download_finished_at: Option<String>,
     pub arr_imported_at: Option<String>,
     pub plex_available_at: Option<String>,
     pub notification_sent_at: Option<String>,
+    pub request_to_arr_grab_seconds: Option<f64>,
+    pub arr_grab_to_download_started_seconds: Option<f64>,
     pub download_finished_to_arr_import_seconds: Option<f64>,
     pub arr_import_to_plex_available_seconds: Option<f64>,
     pub plex_available_to_notification_seconds: Option<f64>,
@@ -123,6 +128,13 @@ pub async fn recent_software_delay_rows_with_options(
                 mri.season_number,
                 mri.episode_number,
                 mri.requested_at,
+                CASE
+                    WHEN mri.availability_class = 'future_airing' AND mri.air_date IS NOT NULL
+                    THEN mri.air_date
+                    ELSE mri.requested_at
+                END AS effective_start_at,
+                COALESCE(mri.radarr_grabbed_at, mri.sonarr_grabbed_at) AS arr_grabbed_at,
+                mri.download_started_at,
                 mri.download_finished_at,
                 COALESCE(mri.radarr_imported_at, mri.sonarr_imported_at) AS arr_imported_at,
                 mri.plex_available_at,
@@ -130,7 +142,10 @@ pub async fn recent_software_delay_rows_with_options(
             FROM media_request_items mri
             JOIN media_requests mr ON mr.id = mri.media_request_id
             WHERE (
-                mri.download_finished_at IS NOT NULL
+                mri.sonarr_grabbed_at IS NOT NULL
+                OR mri.radarr_grabbed_at IS NOT NULL
+                OR mri.download_started_at IS NOT NULL
+                OR mri.download_finished_at IS NOT NULL
                 OR mri.radarr_imported_at IS NOT NULL
                 OR mri.sonarr_imported_at IS NOT NULL
                 OR mri.plex_available_at IS NOT NULL
@@ -148,7 +163,10 @@ pub async fn recent_software_delay_rows_with_options(
                         OR child.episode_number IS NOT NULL
                       )
                       AND (
-                        child.download_finished_at IS NOT NULL
+                        child.sonarr_grabbed_at IS NOT NULL
+                        OR child.radarr_grabbed_at IS NOT NULL
+                        OR child.download_started_at IS NOT NULL
+                        OR child.download_finished_at IS NOT NULL
                         OR child.radarr_imported_at IS NOT NULL
                         OR child.sonarr_imported_at IS NOT NULL
                         OR child.plex_available_at IS NOT NULL
@@ -160,6 +178,18 @@ pub async fn recent_software_delay_rows_with_options(
         measured AS (
             SELECT
             *,
+            CASE
+                WHEN effective_start_at IS NOT NULL
+                 AND arr_grabbed_at IS NOT NULL
+                 AND julianday(arr_grabbed_at) >= julianday(effective_start_at)
+                THEN (julianday(arr_grabbed_at) - julianday(effective_start_at)) * 86400.0
+            END AS request_to_arr_grab_seconds,
+            CASE
+                WHEN arr_grabbed_at IS NOT NULL
+                 AND download_started_at IS NOT NULL
+                 AND julianday(download_started_at) >= julianday(arr_grabbed_at)
+                THEN (julianday(download_started_at) - julianday(arr_grabbed_at)) * 86400.0
+            END AS arr_grab_to_download_started_seconds,
             CASE
                 WHEN download_finished_at IS NOT NULL
                  AND arr_imported_at IS NOT NULL
@@ -183,6 +213,8 @@ pub async fn recent_software_delay_rows_with_options(
         SELECT *
         FROM measured
         WHERE ? = 0
+           OR request_to_arr_grab_seconds IS NOT NULL
+           OR arr_grab_to_download_started_seconds IS NOT NULL
            OR download_finished_to_arr_import_seconds IS NOT NULL
            OR arr_import_to_plex_available_seconds IS NOT NULL
            OR plex_available_to_notification_seconds IS NOT NULL
@@ -201,6 +233,12 @@ pub async fn recent_software_delay_rows_with_options(
             let download_finished_to_arr_import_seconds = row
                 .get::<Option<f64>, _>("download_finished_to_arr_import_seconds")
                 .map(clean_seconds);
+            let request_to_arr_grab_seconds = row
+                .get::<Option<f64>, _>("request_to_arr_grab_seconds")
+                .map(clean_seconds);
+            let arr_grab_to_download_started_seconds = row
+                .get::<Option<f64>, _>("arr_grab_to_download_started_seconds")
+                .map(clean_seconds);
             let arr_import_to_plex_available_seconds = row
                 .get::<Option<f64>, _>("arr_import_to_plex_available_seconds")
                 .map(clean_seconds);
@@ -208,6 +246,8 @@ pub async fn recent_software_delay_rows_with_options(
                 .get::<Option<f64>, _>("plex_available_to_notification_seconds")
                 .map(clean_seconds);
             let total_software_delay_seconds = [
+                request_to_arr_grab_seconds,
+                arr_grab_to_download_started_seconds,
                 download_finished_to_arr_import_seconds,
                 arr_import_to_plex_available_seconds,
                 plex_available_to_notification_seconds,
@@ -216,10 +256,14 @@ pub async fn recent_software_delay_rows_with_options(
             .flatten()
             .sum();
             let download_finished_at: Option<String> = row.get("download_finished_at");
+            let arr_grabbed_at: Option<String> = row.get("arr_grabbed_at");
+            let download_started_at: Option<String> = row.get("download_started_at");
             let arr_imported_at: Option<String> = row.get("arr_imported_at");
             let plex_available_at: Option<String> = row.get("plex_available_at");
             let notification_sent_at: Option<String> = row.get("notification_sent_at");
             let stages = [
+                ("arr_grabbed", arr_grabbed_at.is_some()),
+                ("download_started", download_started_at.is_some()),
                 ("download_finished", download_finished_at.is_some()),
                 ("arr_imported", arr_imported_at.is_some()),
                 ("plex_available", plex_available_at.is_some()),
@@ -245,10 +289,15 @@ pub async fn recent_software_delay_rows_with_options(
                 season_number,
                 episode_number,
                 requested_at: row.get("requested_at"),
+                effective_start_at: row.get("effective_start_at"),
+                arr_grabbed_at,
+                download_started_at,
                 download_finished_at,
                 arr_imported_at,
                 plex_available_at,
                 notification_sent_at,
+                request_to_arr_grab_seconds,
+                arr_grab_to_download_started_seconds,
                 download_finished_to_arr_import_seconds,
                 arr_import_to_plex_available_seconds,
                 plex_available_to_notification_seconds,

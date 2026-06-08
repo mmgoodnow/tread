@@ -59,6 +59,22 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
         &["media_type", "download_client"],
     )?;
+    let request_to_arr_grab = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_to_arr_grab_seconds",
+            "Seconds from request submission, or episode air date for future-airing items, to Arr grab.",
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
+        &["media_type", "arr"],
+    )?;
+    let arr_grab_to_download_started = HistogramVec::new(
+        HistogramOpts::new(
+            "media_request_arr_grab_to_download_started_seconds",
+            "Seconds from Arr grab to BitTorrent download start.",
+        )
+        .buckets(REQUEST_LIFECYCLE_BUCKETS.to_vec()),
+        &["media_type", "arr", "download_client"],
+    )?;
     let request_to_download_finished = HistogramVec::new(
         HistogramOpts::new(
             "media_request_to_download_finished_seconds",
@@ -159,6 +175,8 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
 
     registry.register(Box::new(request_to_plex.clone()))?;
     registry.register(Box::new(request_to_download_started.clone()))?;
+    registry.register(Box::new(request_to_arr_grab.clone()))?;
+    registry.register(Box::new(arr_grab_to_download_started.clone()))?;
     registry.register(Box::new(request_to_download_finished.clone()))?;
     registry.register(Box::new(request_to_notification.clone()))?;
     registry.register(Box::new(request_to_first_available.clone()))?;
@@ -195,6 +213,7 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         r#"
         SELECT media_type, availability_class, requested_at, air_date,
                download_started_at, download_finished_at,
+               sonarr_grabbed_at, radarr_grabbed_at,
                sonarr_imported_at, radarr_imported_at,
                plex_available_at, overseerr_notification_sent_at
         FROM media_request_items
@@ -212,11 +231,16 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
         let media_type: String = row.get("media_type");
         let availability_class: String = row.get("availability_class");
         let requested_at: String = row.get("requested_at");
+        let air_date: Option<String> = row.get("air_date");
         let plex_available_at: Option<String> = row.get("plex_available_at");
+        let effective_start_at = if availability_class == "future_airing" {
+            air_date.as_deref().unwrap_or(&requested_at)
+        } else {
+            &requested_at
+        };
 
         if availability_class == "future_airing" {
-            let air_date: Option<String> = row.get("air_date");
-            if let Some(air_date) = air_date {
+            if let Some(air_date) = air_date.clone() {
                 observe_duration(
                     &episode_air_to_plex,
                     &["tautulli"],
@@ -242,6 +266,23 @@ pub async fn render_metrics(pool: &SqlitePool) -> anyhow::Result<String> {
             &request_to_download_started,
             &[&media_type, "rtorrent"],
             &requested_at,
+            row.get("download_started_at"),
+        )?;
+        let (arr, grabbed_at): (&str, Option<String>) = if media_type == "movie" {
+            ("radarr", row.get("radarr_grabbed_at"))
+        } else {
+            ("sonarr", row.get("sonarr_grabbed_at"))
+        };
+        observe_duration(
+            &request_to_arr_grab,
+            &[&media_type, arr],
+            effective_start_at,
+            grabbed_at.clone(),
+        )?;
+        observe_duration_between(
+            &arr_grab_to_download_started,
+            &[&media_type, arr, "rtorrent"],
+            grabbed_at,
             row.get("download_started_at"),
         )?;
         observe_duration(
