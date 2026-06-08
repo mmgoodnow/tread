@@ -74,7 +74,12 @@ pub struct RecentSoftwareDelayRow {
     pub download_finished_to_arr_import_seconds: Option<f64>,
     pub arr_import_to_plex_available_seconds: Option<f64>,
     pub plex_available_to_notification_seconds: Option<f64>,
+    pub known_software_delay_seconds: f64,
     pub total_software_delay_seconds: f64,
+    pub observed_stage_count: i64,
+    pub expected_stage_count: i64,
+    pub lifecycle_complete: bool,
+    pub missing_stages: Vec<&'static str>,
 }
 
 fn default_recent_limit() -> i64 {
@@ -167,6 +172,22 @@ pub async fn recent_software_delay_rows(
             .into_iter()
             .flatten()
             .sum();
+            let download_finished_at: Option<String> = row.get("download_finished_at");
+            let arr_imported_at: Option<String> = row.get("arr_imported_at");
+            let plex_available_at: Option<String> = row.get("plex_available_at");
+            let notification_sent_at: Option<String> = row.get("notification_sent_at");
+            let stages = [
+                ("download_finished", download_finished_at.is_some()),
+                ("arr_imported", arr_imported_at.is_some()),
+                ("plex_available", plex_available_at.is_some()),
+                ("notification_sent", notification_sent_at.is_some()),
+            ];
+            let expected_stage_count = stages.len() as i64;
+            let missing_stages = stages
+                .into_iter()
+                .filter_map(|(stage, present)| (!present).then_some(stage))
+                .collect::<Vec<_>>();
+            let observed_stage_count = expected_stage_count - missing_stages.len() as i64;
 
             RecentSoftwareDelayRow {
                 item_id: row.get("item_id"),
@@ -177,14 +198,19 @@ pub async fn recent_software_delay_rows(
                 season_number: row.get("season_number"),
                 episode_number: row.get("episode_number"),
                 requested_at: row.get("requested_at"),
-                download_finished_at: row.get("download_finished_at"),
-                arr_imported_at: row.get("arr_imported_at"),
-                plex_available_at: row.get("plex_available_at"),
-                notification_sent_at: row.get("notification_sent_at"),
+                download_finished_at,
+                arr_imported_at,
+                plex_available_at,
+                notification_sent_at,
                 download_finished_to_arr_import_seconds,
                 arr_import_to_plex_available_seconds,
                 plex_available_to_notification_seconds,
+                known_software_delay_seconds: total_software_delay_seconds,
                 total_software_delay_seconds,
+                observed_stage_count,
+                expected_stage_count,
+                lifecycle_complete: missing_stages.is_empty(),
+                missing_stages,
             }
         })
         .collect();

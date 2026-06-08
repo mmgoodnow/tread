@@ -186,6 +186,38 @@
                 "value": 80
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Missing stages"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Complete"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bool"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
           }
         ]
       },
@@ -228,6 +260,26 @@
               "type": "number"
             },
             {
+              "selector": "observed_stage_count",
+              "text": "Observed stages",
+              "type": "number"
+            },
+            {
+              "selector": "expected_stage_count",
+              "text": "Expected stages",
+              "type": "number"
+            },
+            {
+              "selector": "lifecycle_complete",
+              "text": "Complete",
+              "type": "boolean"
+            },
+            {
+              "selector": "missing_stages",
+              "text": "Missing stages",
+              "type": "string"
+            },
+            {
               "selector": "download_finished_to_arr_import_seconds",
               "text": "Download done -> Arr",
               "type": "number"
@@ -243,8 +295,8 @@
               "type": "number"
             },
             {
-              "selector": "total_software_delay_seconds",
-              "text": "Total software delay",
+              "selector": "known_software_delay_seconds",
+              "text": "Known software delay",
               "type": "number"
             }
           ],
@@ -794,5 +846,5 @@
   "timezone": "browser",
   "title": "Tread Media Lifecycle",
   "uid": "tread-lifecycle",
-  "version": 8
+  "version": 9
 }
