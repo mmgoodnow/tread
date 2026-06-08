@@ -207,18 +207,8 @@
                             "type": "string"
                           },
                           {
-                            "selector": "plex_available_to_notification_seconds",
-                            "text": "email",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "arr_import_to_plex_available_seconds",
-                            "text": "plex",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "download_finished_to_arr_import_seconds",
-                            "text": "import",
+                            "selector": "arr_grab_to_download_started_seconds",
+                            "text": "download start",
                             "type": "number"
                           },
                           {
@@ -227,8 +217,18 @@
                             "type": "number"
                           },
                           {
-                            "selector": "arr_grab_to_download_started_seconds",
-                            "text": "download start",
+                            "selector": "download_finished_to_arr_import_seconds",
+                            "text": "import",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "arr_import_to_plex_available_seconds",
+                            "text": "plex",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "plex_available_to_notification_seconds",
+                            "text": "email",
                             "type": "number"
                           },
                           {
