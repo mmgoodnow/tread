@@ -18,9 +18,11 @@
             "scaleDistribution": {
               "type": "log",
               "log": 10
-            }
+            },
+            "axisSoftMin": 0.001
           },
-          "unit": "s"
+          "unit": "s",
+          "min": 0.001
         },
         "overrides": [
           {
@@ -50,9 +52,17 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Arr import -> Plex"
+              "options": "Download done -> Arr"
             },
             "properties": [
+              {
+                "id": "min",
+                "value": 0.001
+              },
+              {
+                "id": "custom.axisSoftMin",
+                "value": 0.001
+              },
               {
                 "id": "custom.scaleDistribution",
                 "value": {
@@ -65,9 +75,17 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Download done -> Arr"
+              "options": "Arr import -> Plex"
             },
             "properties": [
+              {
+                "id": "min",
+                "value": 0.001
+              },
+              {
+                "id": "custom.axisSoftMin",
+                "value": 0.001
+              },
               {
                 "id": "custom.scaleDistribution",
                 "value": {
@@ -83,6 +101,14 @@
               "options": "Plex -> notification"
             },
             "properties": [
+              {
+                "id": "min",
+                "value": 0.001
+              },
+              {
+                "id": "custom.axisSoftMin",
+                "value": 0.001
+              },
               {
                 "id": "custom.scaleDistribution",
                 "value": {
