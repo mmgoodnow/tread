@@ -134,7 +134,7 @@ pub async fn recent_software_delay_rows(
             CASE
                 WHEN arr_imported_at IS NOT NULL
                  AND plex_available_at IS NOT NULL
-                 AND julianday(plex_available_at) >= julianday(arr_imported_at)
+                 AND ((julianday(plex_available_at) - julianday(arr_imported_at)) * 86400.0) >= -1.0
                 THEN (julianday(plex_available_at) - julianday(arr_imported_at)) * 86400.0
             END AS arr_import_to_plex_available_seconds,
             CASE

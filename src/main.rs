@@ -188,7 +188,7 @@ async fn replay_events(settings: Settings, args: ReplayEventsArgs) -> anyhow::Re
     };
     let sql = format!(
         r#"
-        SELECT id, source, event_type, payload_json
+        SELECT id, source, event_type, payload_json, observed_at
         FROM events
         {where_clause}
         ORDER BY observed_at ASC, id ASC
@@ -205,11 +205,13 @@ async fn replay_events(settings: Settings, args: ReplayEventsArgs) -> anyhow::Re
         let source = row.get::<String, _>("source");
         let event_type = row.get::<String, _>("event_type");
         let payload_json = row.get::<String, _>("payload_json");
+        let observed_at = row.get::<String, _>("observed_at");
         let Some(event) = event_from_stored_payload(
             tautulli_client.as_ref(),
             &source,
             &event_type,
             &payload_json,
+            &observed_at,
         )
         .await?
         else {
@@ -252,8 +254,14 @@ async fn event_from_stored_payload(
     source: &str,
     event_type: &str,
     payload_json: &str,
+    observed_at: &str,
 ) -> anyhow::Result<Option<EventIngest>> {
-    let payload = serde_json::from_str::<Value>(payload_json)?;
+    let mut payload = serde_json::from_str::<Value>(payload_json)?;
+    if let Some(object) = payload.as_object_mut() {
+        object
+            .entry("observed_at")
+            .or_insert_with(|| Value::String(observed_at.to_string()));
+    }
     let Some(source) = event_source_from_str(source) else {
         return Ok(None);
     };

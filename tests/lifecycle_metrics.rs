@@ -222,6 +222,63 @@ async fn recent_software_delay_rows_expose_missing_lifecycle_stages() {
 }
 
 #[tokio::test]
+async fn recent_software_delay_rows_clamp_subsecond_arr_to_plex_skew() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(550),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(11368),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("Nearly Same Instant".to_string()),
+                year: Some(2026),
+                season_number: None,
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "Nearly Same Instant".to_string(),
+            requested_by: None,
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 4, 44, 59).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET download_finished_at = '2026-06-02T04:53:48+00:00',
+            radarr_imported_at = '2026-06-02T04:53:48.047606700+00:00',
+            plex_available_at = '2026-06-02T04:53:48+00:00'
+        WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = 550)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+    let row = rows.first().expect("delay row");
+
+    assert_eq!(row.arr_import_to_plex_available_seconds, Some(0.0));
+}
+
+#[tokio::test]
 async fn radarr_download_marks_download_finished() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());

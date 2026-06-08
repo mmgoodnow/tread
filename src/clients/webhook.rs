@@ -602,11 +602,36 @@ pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
             .or_else(|| text_at(&payload, &["release", "guid"]))
             .or_else(|| int_at(root, &["id"]).map(|id| id.to_string())),
         identity: Some(identity),
-        observed_at: parse_datetime_or_now(
-            payload.get("observed_at").or_else(|| payload.get("date")),
-        ),
+        observed_at: arr_observed_at(&payload),
         payload_json: payload,
     }
+}
+
+fn arr_observed_at(payload: &Value) -> chrono::DateTime<Utc> {
+    let event_type = text_at(payload, &["eventType"])
+        .or_else(|| text_at(payload, &["event_type"]))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let import_event = matches!(
+        event_type.as_str(),
+        "download" | "import" | "download_import" | "moviedownloaded"
+    );
+    if import_event {
+        if let Some(value) = payload
+            .get("movieFile")
+            .and_then(|file| file.get("dateAdded"))
+            .or_else(|| {
+                payload
+                    .get("episodeFile")
+                    .and_then(|file| file.get("dateAdded"))
+            })
+            .and_then(parse_datetime_value)
+        {
+            return value;
+        }
+    }
+
+    parse_datetime_or_now(payload.get("observed_at").or_else(|| payload.get("date")))
 }
 
 fn text_at(value: &Value, path: &[&str]) -> Option<String> {
@@ -772,7 +797,7 @@ fn unix_timestamp(timestamp: i64) -> Option<chrono::DateTime<Utc>> {
 mod tests {
     use serde_json::json;
 
-    use super::{generic_media_event, overseerr_request_from_payload, rtorrent_event};
+    use super::{arr_event, generic_media_event, overseerr_request_from_payload, rtorrent_event};
     use crate::core::model::{EventSource, MediaType};
 
     #[test]
@@ -901,5 +926,30 @@ mod tests {
         assert_eq!(identity.title.as_deref(), Some("One Piece"));
         assert_eq!(identity.season_number, Some(23));
         assert_eq!(identity.episode_number, Some(10));
+    }
+
+    #[test]
+    fn arr_download_uses_file_date_added_as_import_time() {
+        let event = arr_event(
+            EventSource::Radarr,
+            json!({
+                "eventType": "Download",
+                "observed_at": "2026-06-04T03:54:13.532277086Z",
+                "movieFile": {
+                    "dateAdded": "2026-06-04T03:54:12.8805848Z"
+                },
+                "movie": {
+                    "title": "You, Me & Tuscany",
+                    "tmdbId": 1455079,
+                    "year": 2026
+                },
+                "downloadId": "download-1"
+            }),
+        );
+
+        assert_eq!(
+            event.observed_at.to_rfc3339(),
+            "2026-06-04T03:54:12.880584800+00:00"
+        );
     }
 }
