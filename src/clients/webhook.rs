@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 
 use crate::{
     core::model::{
-        AvailabilityClass, EventIngest, EventSource, IncomingRequest, MediaIdentity,
-        MediaRequestItemInput, MediaType,
+        AvailabilityClass, EventIngest, EventSource, IncomingRequest, MediaIdentifier,
+        MediaIdentity, MediaRequestItemInput, MediaType,
     },
     db::parse_datetime_or_now,
 };
@@ -40,6 +40,7 @@ pub fn overseerr_request_from_payload(payload: &Value) -> Option<IncomingRequest
             year: int_at(media, &["year"]).or_else(|| int_at(request, &["year"])),
             season_number,
             episode_number,
+            identifiers: identifiers_from_overseerr(media),
         },
         items,
         title,
@@ -211,6 +212,7 @@ fn generic_media_identity(
                     .and_then(|episodes| episodes.first())
                     .and_then(|episode| int_at(episode, &["episodeNumber"]))
             }),
+        identifiers: identifiers_from_generic(source, arr_root, payload),
     })
 }
 
@@ -280,7 +282,113 @@ fn tautulli_identity(payload: &Value) -> Option<MediaIdentity> {
             .or_else(|| season_number_from_title(&text_at(payload, &["parent_title"])?)),
         episode_number: int_at(payload, &["episode_number"])
             .or_else(|| int_at(payload, &["episodeNumber"])),
+        identifiers: identifiers_from_tautulli(payload, &raw_media_type),
     })
+}
+
+fn identifiers_from_overseerr(media: &Value) -> Vec<MediaIdentifier> {
+    let mut identifiers = Vec::new();
+    push_identifier(
+        &mut identifiers,
+        "overseerr_media_id",
+        int_at(media, &["id"]),
+    );
+    identifiers
+}
+
+fn identifiers_from_generic(
+    source: EventSource,
+    arr_root: Option<&Value>,
+    payload: &Value,
+) -> Vec<MediaIdentifier> {
+    let mut identifiers = Vec::new();
+    match source {
+        EventSource::Sonarr => {
+            if let Some(root) = arr_root {
+                push_identifier(&mut identifiers, "sonarr_series_id", int_at(root, &["id"]));
+            }
+        }
+        EventSource::Radarr => {
+            if let Some(root) = arr_root {
+                push_identifier(&mut identifiers, "radarr_movie_id", int_at(root, &["id"]));
+            }
+        }
+        EventSource::Plex => {
+            push_plex_identifiers(&mut identifiers, payload, "media_type");
+        }
+        _ => {}
+    }
+    identifiers
+}
+
+fn identifiers_from_tautulli(payload: &Value, raw_media_type: &str) -> Vec<MediaIdentifier> {
+    let mut identifiers = Vec::new();
+    push_plex_identifiers_for_type(&mut identifiers, payload, raw_media_type);
+    identifiers
+}
+
+fn push_plex_identifiers(
+    identifiers: &mut Vec<MediaIdentifier>,
+    payload: &Value,
+    media_type_path: &str,
+) {
+    if let Some(raw_media_type) = text_at(payload, &[media_type_path]) {
+        push_plex_identifiers_for_type(identifiers, payload, &raw_media_type);
+    }
+}
+
+fn push_plex_identifiers_for_type(
+    identifiers: &mut Vec<MediaIdentifier>,
+    payload: &Value,
+    raw_media_type: &str,
+) {
+    let normalized = raw_media_type.to_ascii_lowercase();
+    if normalized == "episode" {
+        push_identifier(
+            identifiers,
+            "plex_show_rating_key",
+            text_at(payload, &["grandparent_rating_key"]),
+        );
+    } else if normalized == "season" {
+        push_identifier(
+            identifiers,
+            "plex_show_rating_key",
+            text_at(payload, &["parent_rating_key"])
+                .or_else(|| text_at(payload, &["grandparent_rating_key"])),
+        );
+    } else {
+        push_identifier(
+            identifiers,
+            "plex_rating_key",
+            text_at(payload, &["rating_key"]),
+        );
+    }
+}
+
+fn push_identifier<T: ToString>(
+    identifiers: &mut Vec<MediaIdentifier>,
+    namespace: &str,
+    value: Option<T>,
+) {
+    let Some(value) = value.map(|value| value.to_string()) else {
+        return;
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return;
+    }
+
+    if identifiers
+        .iter()
+        .any(|identifier| identifier.namespace == namespace && identifier.value == value)
+    {
+        return;
+    }
+
+    identifiers.push(MediaIdentifier {
+        namespace: namespace.to_string(),
+        value: value.to_string(),
+    });
 }
 
 fn media_type_from_external(value: &str) -> Option<MediaType> {
@@ -377,6 +485,7 @@ pub fn rtorrent_event(mut payload: Value) -> EventIngest {
         year: raw_name.as_deref().and_then(infer_year),
         season_number: raw_name.as_deref().and_then(infer_season_number),
         episode_number: raw_name.as_deref().and_then(infer_episode_number),
+        identifiers: Vec::new(),
     });
     let external_id = text_at(&payload, &["external_id"]).or_else(|| {
         text_at(&payload, &["info_hash"])
@@ -472,6 +581,7 @@ pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
             .and_then(Value::as_array)
             .and_then(|episodes| episodes.first())
             .and_then(|episode| int_at(episode, &["episodeNumber"])),
+        identifiers: identifiers_from_generic(source, Some(root), &payload),
     };
 
     EventIngest {

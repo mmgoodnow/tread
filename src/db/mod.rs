@@ -5,8 +5,8 @@ use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use crate::core::{
     correlation,
     model::{
-        AvailabilityClass, EventIngest, IncomingRequest, MatchOutcome, MediaIdentity,
-        MediaRequestItemInput, MediaType,
+        AvailabilityClass, EventIngest, IncomingRequest, MatchOutcome, MediaIdentifier,
+        MediaIdentity, MediaRequestItemInput, MediaType,
     },
 };
 
@@ -85,6 +85,16 @@ pub async fn upsert_media_request(
 
     let media_request_id = row.get("id");
     upsert_request_items(pool, media_request_id, &request).await?;
+    let media_request_item_id =
+        find_item_for_request(pool, media_request_id, &request.identity).await?;
+    upsert_identity_identifiers(
+        pool,
+        media_request_id,
+        media_request_item_id,
+        &request.identity,
+        1.0,
+    )
+    .await?;
     reconcile_unmatched_events(pool, media_request_id, &request.identity).await?;
 
     Ok(media_request_id)
@@ -160,6 +170,16 @@ pub async fn ingest_event(
 
     if let Some(outcome) = match_outcome {
         update_request_identity_from_event(pool, outcome.media_request_id, &event).await?;
+        if let Some(identity) = &event.identity {
+            upsert_identity_identifiers(
+                pool,
+                outcome.media_request_id,
+                outcome.media_request_item_id,
+                identity,
+                outcome.confidence,
+            )
+            .await?;
+        }
         apply_lifecycle_timestamp(pool, outcome, &event).await?;
     }
 
@@ -259,6 +279,87 @@ async fn update_request_identity_from_event(
     .await?;
 
     Ok(())
+}
+
+async fn upsert_identity_identifiers(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    media_request_item_id: Option<i64>,
+    identity: &MediaIdentity,
+    confidence: f64,
+) -> anyhow::Result<()> {
+    for identifier in identity_identifiers(identity) {
+        sqlx::query(
+            r#"
+            INSERT INTO media_request_identifiers (
+                namespace, value, media_type, media_request_id, media_request_item_id,
+                confidence, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ON CONFLICT(namespace, value, media_type) DO UPDATE SET
+                media_request_id = excluded.media_request_id,
+                media_request_item_id = COALESCE(
+                    excluded.media_request_item_id,
+                    media_request_identifiers.media_request_item_id
+                ),
+                media_type = excluded.media_type,
+                confidence = MAX(media_request_identifiers.confidence, excluded.confidence),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            "#,
+        )
+        .bind(&identifier.namespace)
+        .bind(&identifier.value)
+        .bind(identity.media_type.as_str())
+        .bind(media_request_id)
+        .bind(media_request_item_id)
+        .bind(confidence)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn identity_identifiers(identity: &MediaIdentity) -> Vec<MediaIdentifier> {
+    let mut identifiers = Vec::new();
+    if let Some(tmdb_id) = identity.tmdb_id {
+        identifiers.push(MediaIdentifier {
+            namespace: "tmdb_id".to_string(),
+            value: tmdb_id.to_string(),
+        });
+    }
+    if let Some(tvdb_id) = identity.tvdb_id {
+        identifiers.push(MediaIdentifier {
+            namespace: "tvdb_id".to_string(),
+            value: tvdb_id.to_string(),
+        });
+    }
+    if let Some(imdb_id) = &identity.imdb_id {
+        identifiers.push(MediaIdentifier {
+            namespace: "imdb_id".to_string(),
+            value: imdb_id.clone(),
+        });
+    }
+
+    for identifier in &identity.identifiers {
+        let namespace = identifier.namespace.trim();
+        let value = identifier.value.trim();
+        if namespace.is_empty() || value.is_empty() {
+            continue;
+        }
+        if identifiers
+            .iter()
+            .any(|existing| existing.namespace == namespace && existing.value == value)
+        {
+            continue;
+        }
+        identifiers.push(MediaIdentifier {
+            namespace: namespace.to_string(),
+            value: value.to_string(),
+        });
+    }
+
+    identifiers
 }
 
 async fn apply_lifecycle_column(
@@ -659,6 +760,10 @@ pub async fn find_match(
     pool: &SqlitePool,
     identity: &MediaIdentity,
 ) -> anyhow::Result<Option<MatchOutcome>> {
+    if let Some(outcome) = find_by_identifier(pool, identity).await? {
+        return Ok(Some(outcome));
+    }
+
     if let Some(outcome) = find_by_id(pool, identity, "tmdb_id", identity.tmdb_id, 1.0).await? {
         return Ok(Some(outcome));
     }
@@ -704,6 +809,7 @@ pub async fn find_match(
                     year: row.get("year"),
                     season_number: row.get("season_number"),
                     episode_number: row.get("episode_number"),
+                    identifiers: Vec::new(),
                 };
                 Some((row.get::<i64, _>("id"), request_identity))
             })
@@ -750,6 +856,43 @@ pub async fn find_match(
                 find_item_for_request(pool, outcome.media_request_id, identity).await?;
         }
         return Ok(outcome);
+    }
+
+    Ok(None)
+}
+
+async fn find_by_identifier(
+    pool: &SqlitePool,
+    identity: &MediaIdentity,
+) -> anyhow::Result<Option<MatchOutcome>> {
+    for identifier in identity_identifiers(identity) {
+        let row = sqlx::query(
+            r#"
+            SELECT media_request_id, media_request_item_id, confidence
+            FROM media_request_identifiers
+            WHERE namespace = ?
+              AND value = ?
+              AND media_type = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&identifier.namespace)
+        .bind(&identifier.value)
+        .bind(identity.media_type.as_str())
+        .fetch_optional(pool)
+        .await?;
+
+        if let Some(row) = row {
+            let media_request_id = row.get("media_request_id");
+            return Ok(Some(MatchOutcome {
+                media_request_id,
+                media_request_item_id: row
+                    .get::<Option<i64>, _>("media_request_item_id")
+                    .or(find_item_for_request(pool, media_request_id, identity).await?),
+                confidence: row.get::<f64, _>("confidence").max(0.98),
+            }));
+        }
     }
 
     Ok(None)

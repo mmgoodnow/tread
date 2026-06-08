@@ -49,6 +49,7 @@ async fn request_upsert_reconciles_prior_unmatched_radarr_grab() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -108,6 +109,7 @@ async fn recent_software_delay_rows_break_down_avoidable_lag() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -174,6 +176,7 @@ async fn recent_software_delay_rows_expose_missing_lifecycle_stages() {
                 year: Some(2026),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -237,6 +240,7 @@ async fn radarr_download_marks_download_finished() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -304,6 +308,7 @@ async fn earlier_rtorrent_finish_replaces_later_radarr_generic_finish() {
                 year: Some(1999),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -396,6 +401,7 @@ async fn metrics_include_post_download_and_notification_lag() {
                 year: Some(1999),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -457,6 +463,7 @@ async fn request_upsert_does_not_overwrite_real_title_with_numeric_fallback() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -486,6 +493,7 @@ async fn request_upsert_does_not_overwrite_real_title_with_numeric_fallback() {
                 year: None,
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -530,6 +538,7 @@ async fn title_only_plex_match_updates_generic_movie_item() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -602,6 +611,7 @@ async fn rtorrent_form_hook_marks_download_finished_by_title_fallback() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -657,6 +667,112 @@ async fn rtorrent_form_hook_marks_download_finished_by_title_fallback() {
 }
 
 #[tokio::test]
+async fn learned_plex_show_rating_key_matches_later_tautulli_events() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(550),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(278174),
+                tvdb_id: Some(457154),
+                imdb_id: Some("tt35006947".to_string()),
+                title: Some("Girl Rules".to_string()),
+                year: Some(2026),
+                season_number: Some(1),
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(1),
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Unknown,
+            }],
+            title: "Girl Rules".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 2, 12, 0, 0).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    ingest_event(
+        &pool,
+        generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "episode",
+                "title": "Final Girls",
+                "grandparent_title": "Girl Rules",
+                "parent_title": "Season 1",
+                "grandparent_rating_key": "110001",
+                "grandparent_guids": ["imdb://tt35006947", "tmdb://278174", "tvdb://457154"],
+                "rating_key": "117598",
+                "added_at": "2026-06-02T12:18:02Z"
+            }),
+        ),
+    )
+    .await
+    .expect("first tautulli ingest");
+
+    let identifier = sqlx::query(
+        r#"
+        SELECT media_request_id
+        FROM media_request_identifiers
+        WHERE namespace = 'plex_show_rating_key'
+          AND value = '110001'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("identifier row");
+    assert!(identifier.get::<i64, _>("media_request_id") > 0);
+
+    ingest_event(
+        &pool,
+        generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "episode",
+                "title": "Episode 2",
+                "grandparent_title": "Unhelpful Title",
+                "parent_title": "Season 1",
+                "grandparent_rating_key": "110001",
+                "rating_key": "117599",
+                "added_at": "2026-06-02T12:25:00Z"
+            }),
+        ),
+    )
+    .await
+    .expect("second tautulli ingest");
+
+    let matched_count = sqlx::query(
+        r#"
+        SELECT COUNT(*) AS matched_count
+        FROM events
+        WHERE source = 'tautulli'
+          AND media_request_id IS NOT NULL
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("events row")
+    .get::<i64, _>("matched_count");
+
+    assert_eq!(matched_count, 2);
+}
+
+#[tokio::test]
 async fn request_upsert_reconciles_prior_unmatched_tautulli_by_normalized_title() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
@@ -690,6 +806,7 @@ async fn request_upsert_reconciles_prior_unmatched_tautulli_by_normalized_title(
                 year: Some(1999),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -737,6 +854,7 @@ async fn overseerr_auto_approved_does_not_count_as_available_notification() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -806,6 +924,7 @@ async fn overseerr_media_available_sets_available_notification_timestamp() {
                 year: Some(1985),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -885,6 +1004,7 @@ async fn overseerr_media_available_replaces_pre_plex_notification_timestamp() {
                 year: Some(1999),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -990,6 +1110,7 @@ async fn metrics_include_correlated_request_to_plex_duration() {
                 year: Some(1999),
                 season_number: None,
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: None,
@@ -1052,6 +1173,7 @@ async fn future_airing_items_use_air_date_latency() {
                 year: Some(2026),
                 season_number: Some(3),
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: Some(3),
@@ -1115,6 +1237,7 @@ async fn sonarr_grab_reports_episode_air_to_download_start_latency() {
                 year: None,
                 season_number: Some(1),
                 episode_number: None,
+                identifiers: Vec::new(),
             },
             items: vec![MediaRequestItemInput {
                 season_number: Some(1),

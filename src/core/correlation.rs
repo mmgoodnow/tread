@@ -98,6 +98,7 @@ mod tests {
             year: Some(year),
             season_number: None,
             episode_number: None,
+            identifiers: Vec::new(),
         }
     }
 

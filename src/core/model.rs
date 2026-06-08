@@ -54,6 +54,12 @@ impl EventSource {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MediaIdentifier {
+    pub namespace: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MediaIdentity {
     pub media_type: MediaType,
     pub tmdb_id: Option<i64>,
@@ -63,6 +69,8 @@ pub struct MediaIdentity {
     pub year: Option<i64>,
     pub season_number: Option<i64>,
     pub episode_number: Option<i64>,
+    #[serde(default)]
+    pub identifiers: Vec<MediaIdentifier>,
 }
 
 #[derive(Debug, Clone)]
