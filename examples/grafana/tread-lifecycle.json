@@ -16,8 +16,8 @@
         "defaults": {
           "custom": {
             "scaleDistribution": {
-              "log": 10,
-              "type": "log"
+              "type": "log",
+              "log": 10
             }
           },
           "unit": "s"
@@ -46,11 +46,56 @@
                 "value": 80
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Arr import -> Plex"
+            },
+            "properties": [
+              {
+                "id": "custom.scaleDistribution",
+                "value": {
+                  "type": "log",
+                  "log": 10
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Download done -> Arr"
+            },
+            "properties": [
+              {
+                "id": "custom.scaleDistribution",
+                "value": {
+                  "type": "log",
+                  "log": 10
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Plex -> notification"
+            },
+            "properties": [
+              {
+                "id": "custom.scaleDistribution",
+                "value": {
+                  "type": "log",
+                  "log": 10
+                }
+              }
+            ]
           }
         ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 24,
         "x": 0,
         "y": 0
@@ -68,7 +113,7 @@
           "showLegend": true
         },
         "orientation": "horizontal",
-        "showValue": "auto",
+        "showValue": "never",
         "stacking": "normal",
         "tooltip": {
           "mode": "multi",
@@ -76,7 +121,7 @@
         },
         "xField": "Title",
         "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0
+        "xTickLabelSpacing": 160
       },
       "pluginVersion": "13.0.2",
       "targets": [
@@ -120,7 +165,7 @@
           "root_selector": "$.rows",
           "source": "url",
           "type": "json",
-          "url": "http://tread/api/software-delay/recent?limit=25",
+          "url": "http://tread/api/software-delay/recent?limit=12",
           "url_options": {
             "method": "GET",
             "params": []
@@ -226,7 +271,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 12
       },
       "id": 12,
       "options": {
