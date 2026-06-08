@@ -105,11 +105,6 @@
               "selector": "plex_available_to_notification_seconds",
               "text": "Plex -> notification",
               "type": "number"
-            },
-            {
-              "selector": "total_software_delay_seconds",
-              "text": "Total software delay",
-              "type": "number"
             }
           ],
           "datasource": {
@@ -799,5 +794,5 @@
   "timezone": "browser",
   "title": "Tread Media Lifecycle",
   "uid": "tread-lifecycle",
-  "version": 7
+  "version": 8
 }
