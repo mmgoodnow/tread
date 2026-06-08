@@ -207,6 +207,11 @@
                             "type": "string"
                           },
                           {
+                            "selector": "request_to_arr_grab_seconds",
+                            "text": "snatch",
+                            "type": "number"
+                          },
+                          {
                             "selector": "arr_grab_to_download_started_seconds",
                             "text": "download start",
                             "type": "number"
@@ -229,11 +234,6 @@
                           {
                             "selector": "plex_available_to_notification_seconds",
                             "text": "email",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "request_to_arr_grab_seconds",
-                            "text": "snatch",
                             "type": "number"
                           }
                         ],
@@ -282,7 +282,7 @@
                 "tooltip": {
                   "hideZeros": false,
                   "mode": "multi",
-                  "sort": "desc"
+                  "sort": "none"
                 },
                 "xField": "Title",
                 "xTickLabelRotation": 0,
