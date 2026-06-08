@@ -14,7 +14,13 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "none"
+          "custom": {
+            "scaleDistribution": {
+              "log": 10,
+              "type": "log"
+            }
+          },
+          "unit": "s"
         },
         "overrides": [
           {
@@ -44,7 +50,7 @@
         ]
       },
       "gridPos": {
-        "h": 12,
+        "h": 8,
         "w": 24,
         "x": 0,
         "y": 0
@@ -87,17 +93,17 @@
               "type": "string"
             },
             {
-              "selector": "download_finished_to_arr_import_log10",
+              "selector": "download_finished_to_arr_import_seconds",
               "text": "Download done -> Arr",
               "type": "number"
             },
             {
-              "selector": "arr_import_to_plex_available_log10",
+              "selector": "arr_import_to_plex_available_seconds",
               "text": "Arr import -> Plex",
               "type": "number"
             },
             {
-              "selector": "plex_available_to_notification_log10",
+              "selector": "plex_available_to_notification_seconds",
               "text": "Plex -> notification",
               "type": "number"
             }
@@ -114,14 +120,14 @@
           "root_selector": "$.rows",
           "source": "url",
           "type": "json",
-          "url": "http://tread/api/software-delay/recent?limit=12",
+          "url": "http://tread/api/software-delay/recent?limit=25",
           "url_options": {
             "method": "GET",
             "params": []
           }
         }
       ],
-      "title": "Software-induced delay by recent item (log10 seconds)",
+      "title": "Software-induced delay by recent item",
       "type": "barchart"
     },
     {
@@ -220,7 +226,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 8
       },
       "id": 12,
       "options": {
@@ -332,7 +338,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 20
+        "y": 16
       },
       "id": 1,
       "options": {
@@ -369,7 +375,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 20
+        "y": 16
       },
       "id": 2,
       "options": {
@@ -411,7 +417,7 @@
         "h": 5,
         "w": 6,
         "x": 12,
-        "y": 20
+        "y": 16
       },
       "id": 3,
       "options": {
@@ -446,7 +452,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 20
+        "y": 16
       },
       "id": 4,
       "options": {
@@ -506,7 +512,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 21
       },
       "id": 5,
       "options": {
@@ -612,7 +618,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 21
       },
       "id": 6,
       "options": {
@@ -718,7 +724,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 29
       },
       "id": 7,
       "options": {
@@ -751,7 +757,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 29
       },
       "id": 8,
       "options": {
@@ -784,7 +790,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 41
+        "y": 37
       },
       "id": 9,
       "targets": [
@@ -810,7 +816,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 41
+        "y": 37
       },
       "id": 10,
       "targets": [
