@@ -778,12 +778,7 @@ pub async fn find_match(
             .await?;
         if let Some(row) = row {
             let media_request_id = row.get("id");
-            return Ok(Some(MatchOutcome {
-                media_request_id,
-                media_request_item_id: find_item_for_request(pool, media_request_id, identity)
-                    .await?,
-                confidence: 0.9,
-            }));
+            return match_outcome_for_request(pool, media_request_id, identity, 0.9).await;
         }
     }
 
@@ -822,6 +817,9 @@ pub async fn find_match(
         if let Some(outcome) = &mut outcome {
             outcome.media_request_item_id =
                 find_item_for_request(pool, outcome.media_request_id, identity).await?;
+            if event_requires_specific_item(identity) && outcome.media_request_item_id.is_none() {
+                return Ok(None);
+            }
             return Ok(Some(*outcome));
         }
     }
@@ -854,6 +852,9 @@ pub async fn find_match(
         if let Some(outcome) = &mut outcome {
             outcome.media_request_item_id =
                 find_item_for_request(pool, outcome.media_request_id, identity).await?;
+            if event_requires_specific_item(identity) && outcome.media_request_item_id.is_none() {
+                return Ok(None);
+            }
         }
         return Ok(outcome);
     }
@@ -885,11 +886,18 @@ async fn find_by_identifier(
 
         if let Some(row) = row {
             let media_request_id = row.get("media_request_id");
+            if identity_conflicts_with_request(pool, media_request_id, identity).await? {
+                continue;
+            }
+            let media_request_item_id = row
+                .get::<Option<i64>, _>("media_request_item_id")
+                .or(find_item_for_request(pool, media_request_id, identity).await?);
+            if event_requires_specific_item(identity) && media_request_item_id.is_none() {
+                return Ok(None);
+            }
             return Ok(Some(MatchOutcome {
                 media_request_id,
-                media_request_item_id: row
-                    .get::<Option<i64>, _>("media_request_item_id")
-                    .or(find_item_for_request(pool, media_request_id, identity).await?),
+                media_request_item_id,
                 confidence: row.get::<f64, _>("confidence").max(0.98),
             }));
         }
@@ -919,14 +927,83 @@ async fn find_by_id(
 
     if let Some(row) = row {
         let media_request_id = row.get("id");
-        return Ok(Some(MatchOutcome {
-            media_request_id,
-            media_request_item_id: find_item_for_request(pool, media_request_id, identity).await?,
-            confidence,
-        }));
+        return match_outcome_for_request(pool, media_request_id, identity, confidence).await;
     }
 
     Ok(None)
+}
+
+async fn match_outcome_for_request(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    identity: &MediaIdentity,
+    confidence: f64,
+) -> anyhow::Result<Option<MatchOutcome>> {
+    if identity_conflicts_with_request(pool, media_request_id, identity).await? {
+        return Ok(None);
+    }
+
+    let media_request_item_id = find_item_for_request(pool, media_request_id, identity).await?;
+    if event_requires_specific_item(identity) && media_request_item_id.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(MatchOutcome {
+        media_request_id,
+        media_request_item_id,
+        confidence,
+    }))
+}
+
+async fn identity_conflicts_with_request(
+    pool: &SqlitePool,
+    media_request_id: i64,
+    identity: &MediaIdentity,
+) -> anyhow::Result<bool> {
+    let row = sqlx::query(
+        r#"
+        SELECT tmdb_id, tvdb_id, imdb_id
+        FROM media_requests
+        WHERE id = ?
+        "#,
+    )
+    .bind(media_request_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(true);
+    };
+
+    let request_tmdb_id = row.get::<Option<i64>, _>("tmdb_id");
+    if ids_conflict(identity.tmdb_id, request_tmdb_id) {
+        return Ok(true);
+    }
+
+    let request_tvdb_id = row.get::<Option<i64>, _>("tvdb_id");
+    if ids_conflict(identity.tvdb_id, request_tvdb_id) {
+        return Ok(true);
+    }
+
+    let request_imdb_id = row.get::<Option<String>, _>("imdb_id");
+    if let (Some(event_imdb_id), Some(request_imdb_id)) = (&identity.imdb_id, request_imdb_id)
+        && event_imdb_id != &request_imdb_id
+        && identity.tmdb_id.is_none()
+        && identity.tvdb_id.is_none()
+    {
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn ids_conflict(event_id: Option<i64>, request_id: Option<i64>) -> bool {
+    matches!((event_id, request_id), (Some(event_id), Some(request_id)) if event_id != request_id)
+}
+
+fn event_requires_specific_item(identity: &MediaIdentity) -> bool {
+    identity.media_type == MediaType::Series
+        && (identity.season_number.is_some() || identity.episode_number.is_some())
 }
 
 async fn find_item_for_request(
@@ -975,22 +1052,38 @@ async fn find_item_for_request(
         }
     }
 
-    let row = sqlx::query(
-        r#"
-        SELECT id FROM media_request_items
-        WHERE media_request_id = ?
-        ORDER BY
-          CASE
-            WHEN season_number IS NULL AND episode_number IS NULL THEN 0
-            ELSE 1
-          END,
-          id
-        LIMIT 1
-        "#,
-    )
-    .bind(media_request_id)
-    .fetch_optional(pool)
-    .await?;
+    let row = if event_requires_specific_item(identity) {
+        sqlx::query(
+            r#"
+            SELECT id FROM media_request_items
+            WHERE media_request_id = ?
+              AND season_number IS NULL
+              AND episode_number IS NULL
+            ORDER BY id
+            LIMIT 1
+            "#,
+        )
+        .bind(media_request_id)
+        .fetch_optional(pool)
+        .await?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT id FROM media_request_items
+            WHERE media_request_id = ?
+            ORDER BY
+              CASE
+                WHEN season_number IS NULL AND episode_number IS NULL THEN 0
+                ELSE 1
+              END,
+              id
+            LIMIT 1
+            "#,
+        )
+        .bind(media_request_id)
+        .fetch_optional(pool)
+        .await?
+    };
 
     Ok(row.map(|row| row.get("id")))
 }

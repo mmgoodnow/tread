@@ -279,6 +279,13 @@ fn tautulli_identity(payload: &Value) -> Option<MediaIdentity> {
         year: int_at(payload, &["year"]).or_else(|| int_at(payload, &["media_year"])),
         season_number: int_at(payload, &["season_number"])
             .or_else(|| int_at(payload, &["seasonNumber"]))
+            .or_else(|| {
+                raw_media_type
+                    .eq_ignore_ascii_case("season")
+                    .then(|| text_at(payload, &["title"]))
+                    .flatten()
+                    .and_then(|title| season_number_from_title(&title))
+            })
             .or_else(|| season_number_from_title(&text_at(payload, &["parent_title"])?)),
         episode_number: int_at(payload, &["episode_number"])
             .or_else(|| int_at(payload, &["episodeNumber"])),
@@ -836,7 +843,7 @@ mod tests {
         let identity = event.identity.expect("identity");
         assert_eq!(identity.media_type, MediaType::Series);
         assert_eq!(identity.title.as_deref(), Some("Rafa"));
-        assert_eq!(identity.season_number, None);
+        assert_eq!(identity.season_number, Some(1));
     }
 
     #[test]

@@ -773,6 +773,86 @@ async fn learned_plex_show_rating_key_matches_later_tautulli_events() {
 }
 
 #[tokio::test]
+async fn series_title_match_does_not_fall_back_to_wrong_requested_season() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(551),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(111110),
+                tvdb_id: Some(392276),
+                imdb_id: Some("tt0388629".to_string()),
+                title: Some("One Piece (2023)".to_string()),
+                year: Some(2023),
+                season_number: Some(1),
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(1),
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Unknown,
+            }],
+            title: "One Piece (2023)".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 7, 15, 0, 0).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    let outcome = ingest_event(
+        &pool,
+        generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "episode",
+                "title": "Episode 10",
+                "grandparent_title": "One Piece",
+                "parent_title": "Season 23",
+                "grandparent_rating_key": "92442",
+                "grandparent_guids": ["imdb://tt0388629", "tmdb://37854", "tvdb://81797"],
+                "rating_key": "117843",
+                "added_at": "2026-05-24T16:17:39Z"
+            }),
+        ),
+    )
+    .await
+    .expect("tautulli ingest");
+
+    assert!(outcome.is_none());
+
+    let row = sqlx::query(
+        r#"
+        SELECT mri.plex_available_at, e.media_request_id
+        FROM media_request_items mri
+        CROSS JOIN events e
+        WHERE mri.media_request_id = (
+            SELECT id FROM media_requests WHERE overseerr_request_id = 551
+        )
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("row");
+
+    assert_eq!(
+        row.get::<Option<String>, _>("plex_available_at").as_deref(),
+        None
+    );
+    assert_eq!(row.get::<Option<i64>, _>("media_request_id"), None);
+}
+
+#[tokio::test]
 async fn request_upsert_reconciles_prior_unmatched_tautulli_by_normalized_title() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
