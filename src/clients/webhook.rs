@@ -120,40 +120,7 @@ pub fn generic_media_event(
         .get("media")
         .or_else(|| payload.get("media"))
         .unwrap_or(&payload);
-    let media_type = text_at(&payload, &["media_type"])
-        .or_else(|| text_at(&payload, &["mediaType"]))
-        .or_else(|| text_at(request, &["type"]))
-        .or_else(|| text_at(media, &["media_type"]))
-        .or_else(|| text_at(media, &["mediaType"]))
-        .or_else(|| text_at(&payload, &["type"]))
-        .and_then(|value| MediaType::try_from(value.as_str()).ok());
-    let identity = media_type.map(|media_type| MediaIdentity {
-        media_type,
-        tmdb_id: int_at(&payload, &["tmdb_id"])
-            .or_else(|| int_at(&payload, &["tmdbId"]))
-            .or_else(|| int_at(media, &["tmdb_id"]))
-            .or_else(|| int_at(media, &["tmdbId"])),
-        tvdb_id: int_at(&payload, &["tvdb_id"])
-            .or_else(|| int_at(&payload, &["tvdbId"]))
-            .or_else(|| int_at(media, &["tvdb_id"]))
-            .or_else(|| int_at(media, &["tvdbId"])),
-        imdb_id: text_at(&payload, &["imdb_id"])
-            .or_else(|| text_at(&payload, &["imdbId"]))
-            .or_else(|| text_at(media, &["imdb_id"]))
-            .or_else(|| text_at(media, &["imdbId"])),
-        title: text_at(&payload, &["title"])
-            .or_else(|| text_at(&payload, &["grandparent_title"]))
-            .or_else(|| text_at(request, &["title"]))
-            .or_else(|| text_at(media, &["title"]))
-            .or_else(|| text_at(media, &["name"])),
-        year: int_at(&payload, &["year"])
-            .or_else(|| int_at(&payload, &["media_year"]))
-            .or_else(|| int_at(media, &["year"])),
-        season_number: int_at(&payload, &["season_number"])
-            .or_else(|| int_at(&payload, &["seasonNumber"])),
-        episode_number: int_at(&payload, &["episode_number"])
-            .or_else(|| int_at(&payload, &["episodeNumber"])),
-    });
+    let identity = generic_media_identity(source, &payload, request, media);
 
     let event_type = match source {
         EventSource::Overseerr => overseerr_event_type(&payload)
@@ -178,6 +145,206 @@ pub fn generic_media_event(
         observed_at: event_observed_at(source, &event_type, &payload),
         payload_json: payload,
     }
+}
+
+fn generic_media_identity(
+    source: EventSource,
+    payload: &Value,
+    request: &Value,
+    media: &Value,
+) -> Option<MediaIdentity> {
+    if source == EventSource::Tautulli {
+        return tautulli_identity(payload);
+    }
+
+    let arr_root = match source {
+        EventSource::Sonarr => payload.get("series"),
+        EventSource::Radarr => payload.get("movie"),
+        _ => None,
+    };
+    let media_type = match source {
+        EventSource::Sonarr => Some(MediaType::Series),
+        EventSource::Radarr => Some(MediaType::Movie),
+        _ => text_at(payload, &["media_type"])
+            .or_else(|| text_at(payload, &["mediaType"]))
+            .or_else(|| text_at(request, &["type"]))
+            .or_else(|| text_at(media, &["media_type"]))
+            .or_else(|| text_at(media, &["mediaType"]))
+            .or_else(|| text_at(payload, &["type"]))
+            .and_then(|value| media_type_from_external(&value)),
+    }?;
+
+    let roots = [arr_root, Some(payload), Some(media), Some(request)];
+    Some(MediaIdentity {
+        media_type,
+        tmdb_id: first_int(&roots, &[&["tmdb_id"], &["tmdbId"]])
+            .or_else(|| tmdb_id_from_guids(payload.get("guids"))),
+        tvdb_id: first_int(&roots, &[&["tvdb_id"], &["tvdbId"]])
+            .or_else(|| tvdb_id_from_guids(payload.get("guids"))),
+        imdb_id: first_text(&roots, &[&["imdb_id"], &["imdbId"]])
+            .or_else(|| imdb_id_from_guids(payload.get("guids"))),
+        title: first_text(
+            &roots,
+            &[
+                &["title"],
+                &["name"],
+                &["grandparent_title"],
+                &["parent_title"],
+            ],
+        ),
+        year: first_int(&roots, &[&["year"], &["media_year"]]),
+        season_number: int_at(payload, &["season_number"])
+            .or_else(|| int_at(payload, &["seasonNumber"]))
+            .or_else(|| {
+                payload
+                    .get("episodes")
+                    .and_then(Value::as_array)
+                    .and_then(|episodes| episodes.first())
+                    .and_then(|episode| int_at(episode, &["seasonNumber"]))
+            }),
+        episode_number: int_at(payload, &["episode_number"])
+            .or_else(|| int_at(payload, &["episodeNumber"]))
+            .or_else(|| {
+                payload
+                    .get("episodes")
+                    .and_then(Value::as_array)
+                    .and_then(|episodes| episodes.first())
+                    .and_then(|episode| int_at(episode, &["episodeNumber"]))
+            }),
+    })
+}
+
+fn tautulli_identity(payload: &Value) -> Option<MediaIdentity> {
+    let raw_media_type = text_at(payload, &["media_type"])
+        .or_else(|| text_at(payload, &["mediaType"]))
+        .or_else(|| text_at(payload, &["type"]))?;
+    let media_type = media_type_from_external(&raw_media_type)?;
+    let is_series_item = media_type == MediaType::Series;
+    let title = if is_series_item {
+        text_at(payload, &["grandparent_title"])
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                text_at(payload, &["parent_title"]).filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| text_at(payload, &["show_title"]).filter(|value| !value.trim().is_empty()))
+            .or_else(|| text_at(payload, &["title"]).filter(|value| !value.trim().is_empty()))
+    } else {
+        text_at(payload, &["title"]).filter(|value| !value.trim().is_empty())
+    };
+
+    let show_guids = if raw_media_type.eq_ignore_ascii_case("episode") {
+        payload.get("grandparent_guids")
+    } else if raw_media_type.eq_ignore_ascii_case("season") {
+        payload
+            .get("parent_guids")
+            .or_else(|| payload.get("grandparent_guids"))
+    } else {
+        payload.get("guids")
+    };
+
+    Some(MediaIdentity {
+        media_type,
+        tmdb_id: if is_series_item {
+            int_at(payload, &["grandparent_tmdb_id"])
+                .or_else(|| int_at(payload, &["show_tmdb_id"]))
+                .or_else(|| tmdb_id_from_guids(show_guids))
+        } else {
+            int_at(payload, &["tmdb_id"])
+                .or_else(|| int_at(payload, &["tmdbId"]))
+                .or_else(|| int_at(payload, &["themoviedb_id"]))
+                .or_else(|| tmdb_id_from_guids(payload.get("guids")))
+        },
+        tvdb_id: if is_series_item {
+            int_at(payload, &["grandparent_tvdb_id"])
+                .or_else(|| int_at(payload, &["show_tvdb_id"]))
+                .or_else(|| tvdb_id_from_guids(show_guids))
+        } else {
+            int_at(payload, &["tvdb_id"])
+                .or_else(|| int_at(payload, &["tvdbId"]))
+                .or_else(|| int_at(payload, &["thetvdb_id"]))
+                .or_else(|| tvdb_id_from_guids(payload.get("guids")))
+        },
+        imdb_id: if is_series_item {
+            text_at(payload, &["grandparent_imdb_id"])
+                .or_else(|| text_at(payload, &["show_imdb_id"]))
+                .or_else(|| imdb_id_from_guids(show_guids))
+        } else {
+            text_at(payload, &["imdb_id"])
+                .or_else(|| text_at(payload, &["imdbId"]))
+                .or_else(|| imdb_id_from_guids(payload.get("guids")))
+        },
+        title,
+        year: int_at(payload, &["year"]).or_else(|| int_at(payload, &["media_year"])),
+        season_number: int_at(payload, &["season_number"])
+            .or_else(|| int_at(payload, &["seasonNumber"]))
+            .or_else(|| season_number_from_title(&text_at(payload, &["parent_title"])?)),
+        episode_number: int_at(payload, &["episode_number"])
+            .or_else(|| int_at(payload, &["episodeNumber"])),
+    })
+}
+
+fn media_type_from_external(value: &str) -> Option<MediaType> {
+    match value.to_ascii_lowercase().as_str() {
+        "movie" => Some(MediaType::Movie),
+        "series" | "tv" | "show" | "episode" | "season" => Some(MediaType::Series),
+        _ => None,
+    }
+}
+
+fn first_int(roots: &[Option<&Value>], paths: &[&[&str]]) -> Option<i64> {
+    roots
+        .iter()
+        .flatten()
+        .find_map(|root| paths.iter().find_map(|path| int_at(root, path)))
+}
+
+fn first_text(roots: &[Option<&Value>], paths: &[&[&str]]) -> Option<String> {
+    roots
+        .iter()
+        .flatten()
+        .find_map(|root| paths.iter().find_map(|path| text_at(root, path)))
+}
+
+fn tmdb_id_from_guids(value: Option<&Value>) -> Option<i64> {
+    id_from_guids(value, "tmdb")
+}
+
+fn tvdb_id_from_guids(value: Option<&Value>) -> Option<i64> {
+    id_from_guids(value, "tvdb")
+}
+
+fn imdb_id_from_guids(value: Option<&Value>) -> Option<String> {
+    guid_values(value).into_iter().find_map(|guid| {
+        guid.strip_prefix("imdb://")
+            .map(ToString::to_string)
+            .filter(|id| !id.is_empty())
+    })
+}
+
+fn id_from_guids(value: Option<&Value>, prefix: &str) -> Option<i64> {
+    let prefix = format!("{prefix}://");
+    guid_values(value).into_iter().find_map(|guid| {
+        guid.strip_prefix(&prefix)
+            .and_then(|id| id.parse::<i64>().ok())
+    })
+}
+
+fn guid_values(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(values)) => values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect(),
+        Some(Value::String(value)) => vec![value.clone()],
+        _ => Vec::new(),
+    }
+}
+
+fn season_number_from_title(title: &str) -> Option<i64> {
+    title
+        .strip_prefix("Season ")
+        .and_then(|value| value.parse::<i64>().ok())
 }
 
 fn overseerr_event_type(payload: &Value) -> Option<String> {
@@ -484,8 +651,8 @@ fn unix_timestamp(timestamp: i64) -> Option<chrono::DateTime<Utc>> {
 mod tests {
     use serde_json::json;
 
-    use super::overseerr_request_from_payload;
-    use crate::core::model::MediaType;
+    use super::{generic_media_event, overseerr_request_from_payload};
+    use crate::core::model::{EventSource, MediaType};
 
     #[test]
     fn overseerr_request_accepts_embedded_media_without_title() {
@@ -511,5 +678,87 @@ mod tests {
         assert_eq!(request.title, "example-series");
         assert_eq!(request.items.len(), 1);
         assert_eq!(request.items[0].season_number, Some(1));
+    }
+
+    #[test]
+    fn tautulli_episode_uses_show_identity() {
+        let event = generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "episode",
+                "title": "Final Girls",
+                "grandparent_title": "Girl Rules",
+                "parent_title": "Season 1",
+                "grandparent_guids": ["imdb://tt35006947", "tmdb://278174", "tvdb://457154"],
+                "guids": ["tmdb://6978558", "tvdb://11637988"],
+                "rating_key": "117598",
+                "observed_at": "2026-06-02T12:18:02Z"
+            }),
+        );
+
+        let identity = event.identity.expect("identity");
+        assert_eq!(identity.media_type, MediaType::Series);
+        assert_eq!(identity.title.as_deref(), Some("Girl Rules"));
+        assert_eq!(identity.tmdb_id, Some(278174));
+        assert_eq!(identity.tvdb_id, Some(457154));
+        assert_eq!(identity.imdb_id.as_deref(), Some("tt35006947"));
+        assert_eq!(identity.season_number, Some(1));
+    }
+
+    #[test]
+    fn tautulli_season_uses_parent_show_title() {
+        let event = generic_media_event(
+            EventSource::Tautulli,
+            "recently_added",
+            json!({
+                "event_type": "recently_added",
+                "media_type": "season",
+                "title": "Season 1",
+                "grandparent_title": "",
+                "parent_title": "Rafa",
+                "rating_key": "117805",
+                "observed_at": "2026-06-07T07:42:37Z"
+            }),
+        );
+
+        let identity = event.identity.expect("identity");
+        assert_eq!(identity.media_type, MediaType::Series);
+        assert_eq!(identity.title.as_deref(), Some("Rafa"));
+        assert_eq!(identity.season_number, None);
+    }
+
+    #[test]
+    fn generic_sonarr_event_uses_nested_series_identifiers() {
+        let event = generic_media_event(
+            EventSource::Sonarr,
+            "Download",
+            json!({
+                "eventType": "Download",
+                "series": {
+                    "title": "Rafa",
+                    "tmdbId": 279884,
+                    "tvdbId": 458014,
+                    "imdbId": "tt35052852",
+                    "year": 2026
+                },
+                "episodes": [{
+                    "seasonNumber": 1,
+                    "episodeNumber": 6
+                }],
+                "downloadId": "download-1",
+                "observed_at": "2026-06-07T07:42:32Z"
+            }),
+        );
+
+        let identity = event.identity.expect("identity");
+        assert_eq!(identity.media_type, MediaType::Series);
+        assert_eq!(identity.title.as_deref(), Some("Rafa"));
+        assert_eq!(identity.tmdb_id, Some(279884));
+        assert_eq!(identity.tvdb_id, Some(458014));
+        assert_eq!(identity.imdb_id.as_deref(), Some("tt35052852"));
+        assert_eq!(identity.season_number, Some(1));
+        assert_eq!(identity.episode_number, Some(6));
     }
 }

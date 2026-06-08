@@ -1,13 +1,18 @@
 use std::{path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, Subcommand};
+use serde_json::Value;
+use sqlx::Row;
 use tokio::task::JoinSet;
 use tread::{
     Settings, api,
     clients::{
-        overseerr::OverseerrClient, prometheus_rtorrent::PrometheusRtorrentClient,
+        overseerr::OverseerrClient,
+        prometheus_rtorrent::PrometheusRtorrentClient,
         tautulli::TautulliClient,
+        webhook::{arr_event, generic_media_event, rtorrent_event},
     },
+    core::model::{EventIngest, EventSource},
     db,
 };
 
@@ -24,6 +29,7 @@ struct Cli {
 enum Command {
     Serve,
     Configure(ConfigureArgs),
+    ReplayEvents(ReplayEventsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -40,6 +46,16 @@ struct ConfigureArgs {
     tautulli_api_key: Option<String>,
 }
 
+#[derive(Debug, Args)]
+struct ReplayEventsArgs {
+    #[arg(long, default_value_t = 1000)]
+    limit: i64,
+    #[arg(long)]
+    all: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -52,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command.unwrap_or(Command::Serve) {
         Command::Serve => serve(Settings::load(cli.config)?).await,
         Command::Configure(args) => configure(args),
+        Command::ReplayEvents(args) => replay_events(Settings::load(cli.config)?, args).await,
     }
 }
 
@@ -157,6 +174,99 @@ fn configure(args: ConfigureArgs) -> anyhow::Result<()> {
     std::fs::write(&args.output, format!("{}\n", lines.join("\n")))?;
     println!("wrote {}", args.output.display());
     Ok(())
+}
+
+async fn replay_events(settings: Settings, args: ReplayEventsArgs) -> anyhow::Result<()> {
+    ensure_sqlite_parent(&settings.database_url)?;
+    let pool = db::connect(&settings.database_url).await?;
+    let limit = args.limit.clamp(1, 100_000);
+    let where_clause = if args.all {
+        ""
+    } else {
+        "WHERE media_request_id IS NULL"
+    };
+    let sql = format!(
+        r#"
+        SELECT id, source, event_type, payload_json
+        FROM events
+        {where_clause}
+        ORDER BY observed_at ASC, id ASC
+        LIMIT ?
+        "#
+    );
+    let rows = sqlx::query(&sql).bind(limit).fetch_all(&pool).await?;
+    let mut matched = 0usize;
+    let mut unmatched = 0usize;
+    let mut skipped = 0usize;
+
+    for row in rows {
+        let event_id = row.get::<i64, _>("id");
+        let source = row.get::<String, _>("source");
+        let event_type = row.get::<String, _>("event_type");
+        let payload_json = row.get::<String, _>("payload_json");
+        let Some(event) = event_from_stored_payload(&source, &event_type, &payload_json) else {
+            skipped += 1;
+            continue;
+        };
+
+        if args.dry_run {
+            if db::find_match(&pool, event.identity.as_ref().unwrap())
+                .await?
+                .is_some()
+            {
+                matched += 1;
+            } else {
+                unmatched += 1;
+            }
+            continue;
+        }
+
+        match db::ingest_event(&pool, event).await? {
+            Some(_) => matched += 1,
+            None => unmatched += 1,
+        }
+        tracing::debug!(event_id, "replayed event");
+    }
+
+    println!(
+        "replayed {} events: matched={}, unmatched={}, skipped={}, dry_run={}",
+        matched + unmatched + skipped,
+        matched,
+        unmatched,
+        skipped,
+        args.dry_run
+    );
+    Ok(())
+}
+
+fn event_from_stored_payload(
+    source: &str,
+    event_type: &str,
+    payload_json: &str,
+) -> Option<EventIngest> {
+    let payload = serde_json::from_str::<Value>(payload_json).ok()?;
+    let source = event_source_from_str(source)?;
+    let event = match source {
+        EventSource::Sonarr | EventSource::Radarr => arr_event(source, payload),
+        EventSource::Torrent => rtorrent_event(payload),
+        EventSource::Overseerr | EventSource::Plex | EventSource::Tautulli => {
+            generic_media_event(source, event_type, payload)
+        }
+    };
+    event.identity.as_ref()?;
+    Some(event)
+}
+
+fn event_source_from_str(source: &str) -> Option<EventSource> {
+    match source {
+        "overseerr" => Some(EventSource::Overseerr),
+        "sonarr" => Some(EventSource::Sonarr),
+        "radarr" => Some(EventSource::Radarr),
+        "torrent" => Some(EventSource::Torrent),
+        "plex" => Some(EventSource::Plex),
+        "tautulli" => Some(EventSource::Tautulli),
+        _ => None,
+    }
 }
 
 fn ensure_sqlite_parent(database_url: &str) -> anyhow::Result<()> {
