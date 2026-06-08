@@ -241,22 +241,7 @@
                   }
                 }
               ],
-              "transformations": [
-                {
-                  "id": "filterFieldsByName",
-                  "options": {
-                    "include": {
-                      "names": [
-                        "Title",
-                        "Type",
-                        "Download done -> Arr",
-                        "Arr import -> Plex",
-                        "Plex -> notification"
-                      ]
-                    }
-                  }
-                }
-              ],
+              "transformations": [],
               "queryOptions": {}
             }
           },
