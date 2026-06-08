@@ -199,7 +199,23 @@
         }
       ],
       "title": "Software-induced delay by recent item",
-      "type": "barchart"
+      "type": "barchart",
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Title",
+                "Type",
+                "Download done -> Arr",
+                "Arr import -> Plex",
+                "Plex -> notification"
+              ]
+            }
+          }
+        }
+      ]
     },
     {
       "datasource": {
