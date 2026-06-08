@@ -244,7 +244,7 @@
                         "root_selector": "$.rows",
                         "source": "url",
                         "type": "json",
-                        "url": "http://tread/api/software-delay/recent?limit=12&measurable_only=true",
+                        "url": "http://tread/api/software-delay/recent?limit=12&measurable_only=true&sort=total_desc",
                         "url_options": {
                           "method": "GET",
                           "params": []

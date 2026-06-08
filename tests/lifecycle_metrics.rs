@@ -559,10 +559,95 @@ async fn recent_software_delay_rows_can_filter_empty_chart_rows() {
     assert_eq!(all_rows[0].display_title, "One Piece S23E10");
     assert_eq!(all_rows[0].known_software_delay_seconds, 0.0);
 
-    let measurable_rows = tread::api::recent_software_delay_rows_with_options(&pool, 10, true)
-        .await
-        .expect("measurable delay rows");
+    let measurable_rows = tread::api::recent_software_delay_rows_with_options(
+        &pool,
+        10,
+        true,
+        tread::api::RecentSoftwareDelaySort::Recent,
+    )
+    .await
+    .expect("measurable delay rows");
     assert!(measurable_rows.is_empty());
+}
+
+#[tokio::test]
+async fn recent_software_delay_rows_can_sort_by_total_delay_desc() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    for (request_id, title, tmdb_id, requested_at, plex_available_at) in [
+        (
+            601,
+            "Short Delay",
+            601,
+            Utc.with_ymd_and_hms(2026, 6, 2, 0, 0, 0).unwrap(),
+            "2026-06-02T00:00:10+00:00",
+        ),
+        (
+            602,
+            "Long Delay",
+            602,
+            Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+            "2026-06-01T00:10:00+00:00",
+        ),
+    ] {
+        upsert_media_request(
+            &pool,
+            IncomingRequest {
+                overseerr_request_id: Some(request_id),
+                identity: MediaIdentity {
+                    media_type: MediaType::Movie,
+                    tmdb_id: Some(tmdb_id),
+                    tvdb_id: None,
+                    imdb_id: None,
+                    title: Some(title.to_string()),
+                    year: Some(2026),
+                    season_number: None,
+                    episode_number: None,
+                    identifiers: Vec::new(),
+                },
+                items: vec![MediaRequestItemInput {
+                    season_number: None,
+                    episode_number: None,
+                    title: None,
+                    air_date: None,
+                    availability_class: AvailabilityClass::Existing,
+                }],
+                title: title.to_string(),
+                requested_by: None,
+                requested_at,
+            },
+        )
+        .await
+        .expect("request insert");
+
+        sqlx::query(
+            r#"
+            UPDATE media_request_items
+            SET radarr_imported_at = requested_at,
+                plex_available_at = ?
+            WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = ?)
+            "#,
+        )
+        .bind(plex_available_at)
+        .bind(request_id)
+        .execute(&pool)
+        .await
+        .expect("item update");
+    }
+
+    let rows = tread::api::recent_software_delay_rows_with_options(
+        &pool,
+        10,
+        true,
+        tread::api::RecentSoftwareDelaySort::TotalDesc,
+    )
+    .await
+    .expect("delay rows");
+
+    assert_eq!(rows[0].title, "Long Delay");
+    assert_eq!(rows[1].title, "Short Delay");
 }
 
 #[tokio::test]

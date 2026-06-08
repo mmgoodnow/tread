@@ -57,6 +57,16 @@ pub struct RecentSoftwareDelayQuery {
     pub limit: i64,
     #[serde(default)]
     pub measurable_only: bool,
+    #[serde(default)]
+    pub sort: RecentSoftwareDelaySort,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecentSoftwareDelaySort {
+    #[default]
+    Recent,
+    TotalDesc,
 }
 
 #[derive(Debug, Serialize)]
@@ -100,8 +110,13 @@ async fn recent_software_delay(
     Query(query): Query<RecentSoftwareDelayQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let limit = query.limit.clamp(1, 200);
-    let rows =
-        recent_software_delay_rows_with_options(&state.pool, limit, query.measurable_only).await?;
+    let rows = recent_software_delay_rows_with_options(
+        &state.pool,
+        limit,
+        query.measurable_only,
+        query.sort,
+    )
+    .await?;
     Ok(Json(json!({ "rows": rows })))
 }
 
@@ -109,14 +124,20 @@ pub async fn recent_software_delay_rows(
     pool: &SqlitePool,
     limit: i64,
 ) -> anyhow::Result<Vec<RecentSoftwareDelayRow>> {
-    recent_software_delay_rows_with_options(pool, limit, false).await
+    recent_software_delay_rows_with_options(pool, limit, false, RecentSoftwareDelaySort::Recent)
+        .await
 }
 
 pub async fn recent_software_delay_rows_with_options(
     pool: &SqlitePool,
     limit: i64,
     measurable_only: bool,
+    sort: RecentSoftwareDelaySort,
 ) -> anyhow::Result<Vec<RecentSoftwareDelayRow>> {
+    let sort = match sort {
+        RecentSoftwareDelaySort::Recent => "recent",
+        RecentSoftwareDelaySort::TotalDesc => "total_desc",
+    };
     let rows = sqlx::query(
         r#"
         WITH lifecycle AS (
@@ -226,11 +247,21 @@ pub async fn recent_software_delay_rows_with_options(
            OR download_finished_to_arr_import_seconds IS NOT NULL
            OR arr_import_to_plex_available_seconds IS NOT NULL
            OR plex_available_to_notification_seconds IS NOT NULL
-        ORDER BY COALESCE(notification_sent_at, plex_available_at, arr_imported_at, download_finished_at, requested_at) DESC
+        ORDER BY
+            CASE WHEN ? = 'total_desc' THEN (
+                COALESCE(request_to_arr_grab_seconds, 0.0)
+                + COALESCE(arr_grab_to_download_started_seconds, 0.0)
+                + COALESCE(download_started_to_download_finished_seconds, 0.0)
+                + COALESCE(download_finished_to_arr_import_seconds, 0.0)
+                + COALESCE(arr_import_to_plex_available_seconds, 0.0)
+                + COALESCE(plex_available_to_notification_seconds, 0.0)
+            ) END DESC,
+            COALESCE(notification_sent_at, plex_available_at, arr_imported_at, download_finished_at, requested_at) DESC
         LIMIT ?
         "#,
     )
     .bind(if measurable_only { 1_i64 } else { 0_i64 })
+    .bind(sort)
     .bind(limit.clamp(1, 200))
     .fetch_all(pool)
     .await?;
