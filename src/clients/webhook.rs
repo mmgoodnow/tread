@@ -490,8 +490,12 @@ pub fn rtorrent_event(mut payload: Value) -> EventIngest {
         imdb_id: None,
         title: title.clone(),
         year: raw_name.as_deref().and_then(infer_year),
-        season_number: raw_name.as_deref().and_then(infer_season_number),
-        episode_number: raw_name.as_deref().and_then(infer_episode_number),
+        season_number: int_at(&payload, &["season_number"])
+            .or_else(|| int_at(&payload, &["seasonNumber"]))
+            .or_else(|| raw_name.as_deref().and_then(infer_season_number)),
+        episode_number: int_at(&payload, &["episode_number"])
+            .or_else(|| int_at(&payload, &["episodeNumber"]))
+            .or_else(|| raw_name.as_deref().and_then(infer_episode_number)),
         identifiers: Vec::new(),
     });
     let external_id = text_at(&payload, &["external_id"]).or_else(|| {
@@ -768,7 +772,7 @@ fn unix_timestamp(timestamp: i64) -> Option<chrono::DateTime<Utc>> {
 mod tests {
     use serde_json::json;
 
-    use super::{generic_media_event, overseerr_request_from_payload};
+    use super::{generic_media_event, overseerr_request_from_payload, rtorrent_event};
     use crate::core::model::{EventSource, MediaType};
 
     #[test]
@@ -877,5 +881,25 @@ mod tests {
         assert_eq!(identity.imdb_id.as_deref(), Some("tt35052852"));
         assert_eq!(identity.season_number, Some(1));
         assert_eq!(identity.episode_number, Some(6));
+    }
+
+    #[test]
+    fn rtorrent_event_preserves_stored_episode_parts() {
+        let event = rtorrent_event(json!({
+            "event_type": "download_finished",
+            "title": "One Piece",
+            "base_path": "/media/Raw/Sonarr/One.Piece.S23E10.mkv",
+            "media_type": "series",
+            "season_number": 23,
+            "episode_number": 10,
+            "info_hash": "abc123",
+            "observed_at": "2026-06-07T16:48:07Z"
+        }));
+
+        let identity = event.identity.expect("identity");
+        assert_eq!(identity.media_type, MediaType::Series);
+        assert_eq!(identity.title.as_deref(), Some("One Piece"));
+        assert_eq!(identity.season_number, Some(23));
+        assert_eq!(identity.episode_number, Some(10));
     }
 }
