@@ -149,6 +149,18 @@ async fn recent_software_delay_rows_break_down_avoidable_lag() {
     assert_eq!(row.download_finished_to_arr_import_seconds, Some(90.0));
     assert_eq!(row.arr_import_to_plex_available_seconds, Some(30.0));
     assert_eq!(row.plex_available_to_notification_seconds, Some(45.0));
+    assert_eq!(
+        row.download_finished_to_arr_import_log10,
+        Some((90.0_f64 + 1.0).log10())
+    );
+    assert_eq!(
+        row.arr_import_to_plex_available_log10,
+        Some((30.0_f64 + 1.0).log10())
+    );
+    assert_eq!(
+        row.plex_available_to_notification_log10,
+        Some((45.0_f64 + 1.0).log10())
+    );
     assert_eq!(row.known_software_delay_seconds, 165.0);
     assert_eq!(row.total_software_delay_seconds, 165.0);
     assert_eq!(row.observed_stage_count, 4);

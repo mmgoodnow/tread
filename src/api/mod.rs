@@ -74,6 +74,9 @@ pub struct RecentSoftwareDelayRow {
     pub download_finished_to_arr_import_seconds: Option<f64>,
     pub arr_import_to_plex_available_seconds: Option<f64>,
     pub plex_available_to_notification_seconds: Option<f64>,
+    pub download_finished_to_arr_import_log10: Option<f64>,
+    pub arr_import_to_plex_available_log10: Option<f64>,
+    pub plex_available_to_notification_log10: Option<f64>,
     pub known_software_delay_seconds: f64,
     pub total_software_delay_seconds: f64,
     pub observed_stage_count: i64,
@@ -205,6 +208,12 @@ pub async fn recent_software_delay_rows(
                 download_finished_to_arr_import_seconds,
                 arr_import_to_plex_available_seconds,
                 plex_available_to_notification_seconds,
+                download_finished_to_arr_import_log10: download_finished_to_arr_import_seconds
+                    .map(log_seconds),
+                arr_import_to_plex_available_log10: arr_import_to_plex_available_seconds
+                    .map(log_seconds),
+                plex_available_to_notification_log10: plex_available_to_notification_seconds
+                    .map(log_seconds),
                 known_software_delay_seconds: total_software_delay_seconds,
                 total_software_delay_seconds,
                 observed_stage_count,
@@ -220,6 +229,10 @@ pub async fn recent_software_delay_rows(
 
 fn clean_seconds(value: f64) -> f64 {
     value.max(0.0).round()
+}
+
+fn log_seconds(value: f64) -> f64 {
+    (value.max(0.0) + 1.0).log10()
 }
 
 async fn overseerr_webhook(
