@@ -65,8 +65,8 @@
         "showValue": "auto",
         "stacking": "normal",
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         },
         "xField": "Title",
         "xTickLabelRotation": 0,
@@ -85,11 +85,6 @@
               "selector": "media_type",
               "text": "Type",
               "type": "string"
-            },
-            {
-              "selector": "season_number",
-              "text": "Season",
-              "type": "number"
             },
             {
               "selector": "download_finished_to_arr_import_seconds",
