@@ -208,27 +208,32 @@
                           },
                           {
                             "selector": "request_to_arr_grab_seconds",
-                            "text": "Request/air -> Arr grab",
+                            "text": "snatch",
                             "type": "number"
                           },
                           {
                             "selector": "arr_grab_to_download_started_seconds",
-                            "text": "Arr grab -> download start",
+                            "text": "download start",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "download_started_to_download_finished_seconds",
+                            "text": "download finish",
                             "type": "number"
                           },
                           {
                             "selector": "download_finished_to_arr_import_seconds",
-                            "text": "Download done -> Arr",
+                            "text": "import",
                             "type": "number"
                           },
                           {
                             "selector": "arr_import_to_plex_available_seconds",
-                            "text": "Arr import -> Plex",
+                            "text": "plex",
                             "type": "number"
                           },
                           {
                             "selector": "plex_available_to_notification_seconds",
-                            "text": "Plex -> notification",
+                            "text": "email",
                             "type": "number"
                           }
                         ],
@@ -386,27 +391,32 @@
                           },
                           {
                             "selector": "request_to_arr_grab_seconds",
-                            "text": "Request/air -> Arr grab",
+                            "text": "snatch",
                             "type": "number"
                           },
                           {
                             "selector": "arr_grab_to_download_started_seconds",
-                            "text": "Arr grab -> download start",
+                            "text": "download start",
+                            "type": "number"
+                          },
+                          {
+                            "selector": "download_started_to_download_finished_seconds",
+                            "text": "download finish",
                             "type": "number"
                           },
                           {
                             "selector": "download_finished_to_arr_import_seconds",
-                            "text": "Download done -> Arr",
+                            "text": "import",
                             "type": "number"
                           },
                           {
                             "selector": "arr_import_to_plex_available_seconds",
-                            "text": "Arr import -> Plex",
+                            "text": "plex",
                             "type": "number"
                           },
                           {
                             "selector": "plex_available_to_notification_seconds",
-                            "text": "Plex -> notification",
+                            "text": "email",
                             "type": "number"
                           },
                           {

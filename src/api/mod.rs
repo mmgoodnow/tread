@@ -79,6 +79,7 @@ pub struct RecentSoftwareDelayRow {
     pub notification_sent_at: Option<String>,
     pub request_to_arr_grab_seconds: Option<f64>,
     pub arr_grab_to_download_started_seconds: Option<f64>,
+    pub download_started_to_download_finished_seconds: Option<f64>,
     pub download_finished_to_arr_import_seconds: Option<f64>,
     pub arr_import_to_plex_available_seconds: Option<f64>,
     pub plex_available_to_notification_seconds: Option<f64>,
@@ -191,6 +192,12 @@ pub async fn recent_software_delay_rows_with_options(
                 THEN (julianday(download_started_at) - julianday(arr_grabbed_at)) * 86400.0
             END AS arr_grab_to_download_started_seconds,
             CASE
+                WHEN download_started_at IS NOT NULL
+                 AND download_finished_at IS NOT NULL
+                 AND julianday(download_finished_at) >= julianday(download_started_at)
+                THEN (julianday(download_finished_at) - julianday(download_started_at)) * 86400.0
+            END AS download_started_to_download_finished_seconds,
+            CASE
                 WHEN download_finished_at IS NOT NULL
                  AND arr_imported_at IS NOT NULL
                  AND julianday(arr_imported_at) >= julianday(download_finished_at)
@@ -215,6 +222,7 @@ pub async fn recent_software_delay_rows_with_options(
         WHERE ? = 0
            OR request_to_arr_grab_seconds IS NOT NULL
            OR arr_grab_to_download_started_seconds IS NOT NULL
+           OR download_started_to_download_finished_seconds IS NOT NULL
            OR download_finished_to_arr_import_seconds IS NOT NULL
            OR arr_import_to_plex_available_seconds IS NOT NULL
            OR plex_available_to_notification_seconds IS NOT NULL
@@ -239,6 +247,9 @@ pub async fn recent_software_delay_rows_with_options(
             let arr_grab_to_download_started_seconds = row
                 .get::<Option<f64>, _>("arr_grab_to_download_started_seconds")
                 .map(clean_seconds);
+            let download_started_to_download_finished_seconds = row
+                .get::<Option<f64>, _>("download_started_to_download_finished_seconds")
+                .map(clean_seconds);
             let arr_import_to_plex_available_seconds = row
                 .get::<Option<f64>, _>("arr_import_to_plex_available_seconds")
                 .map(clean_seconds);
@@ -248,6 +259,7 @@ pub async fn recent_software_delay_rows_with_options(
             let total_software_delay_seconds = [
                 request_to_arr_grab_seconds,
                 arr_grab_to_download_started_seconds,
+                download_started_to_download_finished_seconds,
                 download_finished_to_arr_import_seconds,
                 arr_import_to_plex_available_seconds,
                 plex_available_to_notification_seconds,
@@ -298,6 +310,7 @@ pub async fn recent_software_delay_rows_with_options(
                 notification_sent_at,
                 request_to_arr_grab_seconds,
                 arr_grab_to_download_started_seconds,
+                download_started_to_download_finished_seconds,
                 download_finished_to_arr_import_seconds,
                 arr_import_to_plex_available_seconds,
                 plex_available_to_notification_seconds,

@@ -150,11 +150,15 @@ async fn recent_software_delay_rows_break_down_avoidable_lag() {
     assert_eq!(row.title, "Blood Simple");
     assert_eq!(row.request_to_arr_grab_seconds, Some(10.0));
     assert_eq!(row.arr_grab_to_download_started_seconds, Some(3.0));
+    assert_eq!(
+        row.download_started_to_download_finished_seconds,
+        Some(468.0)
+    );
     assert_eq!(row.download_finished_to_arr_import_seconds, Some(90.0));
     assert_eq!(row.arr_import_to_plex_available_seconds, Some(30.0));
     assert_eq!(row.plex_available_to_notification_seconds, Some(45.0));
-    assert_eq!(row.known_software_delay_seconds, 178.0);
-    assert_eq!(row.total_software_delay_seconds, 178.0);
+    assert_eq!(row.known_software_delay_seconds, 646.0);
+    assert_eq!(row.total_software_delay_seconds, 646.0);
     assert_eq!(row.observed_stage_count, 6);
     assert_eq!(row.expected_stage_count, 6);
     assert!(row.lifecycle_complete);
