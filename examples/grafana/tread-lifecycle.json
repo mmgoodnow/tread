@@ -14,6 +14,12 @@
       },
       "fieldConfig": {
         "defaults": {
+          "custom": {
+            "scaleDistribution": {
+              "log": 10,
+              "type": "log"
+            }
+          },
           "unit": "s"
         },
         "overrides": [
