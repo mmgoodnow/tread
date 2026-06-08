@@ -179,6 +179,7 @@ fn configure(args: ConfigureArgs) -> anyhow::Result<()> {
 async fn replay_events(settings: Settings, args: ReplayEventsArgs) -> anyhow::Result<()> {
     ensure_sqlite_parent(&settings.database_url)?;
     let pool = db::connect(&settings.database_url).await?;
+    let tautulli_client = TautulliClient::from_settings(&settings.tautulli);
     let limit = args.limit.clamp(1, 100_000);
     let where_clause = if args.all {
         ""
@@ -204,7 +205,14 @@ async fn replay_events(settings: Settings, args: ReplayEventsArgs) -> anyhow::Re
         let source = row.get::<String, _>("source");
         let event_type = row.get::<String, _>("event_type");
         let payload_json = row.get::<String, _>("payload_json");
-        let Some(event) = event_from_stored_payload(&source, &event_type, &payload_json) else {
+        let Some(event) = event_from_stored_payload(
+            tautulli_client.as_ref(),
+            &source,
+            &event_type,
+            &payload_json,
+        )
+        .await?
+        else {
             skipped += 1;
             continue;
         };
@@ -239,22 +247,35 @@ async fn replay_events(settings: Settings, args: ReplayEventsArgs) -> anyhow::Re
     Ok(())
 }
 
-fn event_from_stored_payload(
+async fn event_from_stored_payload(
+    tautulli_client: Option<&TautulliClient>,
     source: &str,
     event_type: &str,
     payload_json: &str,
-) -> Option<EventIngest> {
-    let payload = serde_json::from_str::<Value>(payload_json).ok()?;
-    let source = event_source_from_str(source)?;
+) -> anyhow::Result<Option<EventIngest>> {
+    let payload = serde_json::from_str::<Value>(payload_json)?;
+    let Some(source) = event_source_from_str(source) else {
+        return Ok(None);
+    };
     let event = match source {
         EventSource::Sonarr | EventSource::Radarr => arr_event(source, payload),
         EventSource::Torrent => rtorrent_event(payload),
-        EventSource::Overseerr | EventSource::Plex | EventSource::Tautulli => {
+        EventSource::Tautulli => {
+            let payload = if let Some(client) = tautulli_client {
+                client.enrich_recently_added_item(payload).await?
+            } else {
+                payload
+            };
+            generic_media_event(source, event_type, payload)
+        }
+        EventSource::Overseerr | EventSource::Plex => {
             generic_media_event(source, event_type, payload)
         }
     };
-    event.identity.as_ref()?;
-    Some(event)
+    if event.identity.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(event))
 }
 
 fn event_source_from_str(source: &str) -> Option<EventSource> {
