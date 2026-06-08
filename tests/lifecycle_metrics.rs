@@ -324,8 +324,8 @@ async fn episode_events_for_season_request_do_not_share_lifecycle_columns() {
                 "media_type": "episode",
                 "grandparent_title": "MasterChef",
                 "grandparent_guids": ["tmdb://12345", "tvdb://67890"],
-                "season_number": 16,
-                "episode_number": 5,
+                "parent_media_index": "16",
+                "media_index": "5",
                 "rating_key": "episode-5",
                 "added_at": "2026-05-21T07:27:21Z"
             }),
@@ -374,8 +374,8 @@ async fn episode_events_for_season_request_do_not_share_lifecycle_columns() {
                 "media_type": "episode",
                 "grandparent_title": "MasterChef",
                 "grandparent_guids": ["tmdb://12345", "tvdb://67890"],
-                "season_number": 16,
-                "episode_number": 8,
+                "parent_media_index": "16",
+                "media_index": "8",
                 "rating_key": "episode-8",
                 "added_at": "2026-06-04T07:15:27Z"
             }),

@@ -279,6 +279,7 @@ fn tautulli_identity(payload: &Value) -> Option<MediaIdentity> {
         year: int_at(payload, &["year"]).or_else(|| int_at(payload, &["media_year"])),
         season_number: int_at(payload, &["season_number"])
             .or_else(|| int_at(payload, &["seasonNumber"]))
+            .or_else(|| int_at(payload, &["parent_media_index"]))
             .or_else(|| {
                 raw_media_type
                     .eq_ignore_ascii_case("season")
@@ -288,7 +289,13 @@ fn tautulli_identity(payload: &Value) -> Option<MediaIdentity> {
             })
             .or_else(|| season_number_from_title(&text_at(payload, &["parent_title"])?)),
         episode_number: int_at(payload, &["episode_number"])
-            .or_else(|| int_at(payload, &["episodeNumber"])),
+            .or_else(|| int_at(payload, &["episodeNumber"]))
+            .or_else(|| {
+                raw_media_type
+                    .eq_ignore_ascii_case("episode")
+                    .then(|| int_at(payload, &["media_index"]))
+                    .flatten()
+            }),
         identifiers: identifiers_from_tautulli(payload, &raw_media_type),
     })
 }
