@@ -208,32 +208,32 @@
                           },
                           {
                             "selector": "request_to_arr_grab_seconds",
-                            "text": "snatch",
+                            "text": "01 snatch",
                             "type": "number"
                           },
                           {
                             "selector": "arr_grab_to_download_started_seconds",
-                            "text": "download start",
+                            "text": "02 download start",
                             "type": "number"
                           },
                           {
                             "selector": "download_started_to_download_finished_seconds",
-                            "text": "download finish",
+                            "text": "03 download finish",
                             "type": "number"
                           },
                           {
                             "selector": "download_finished_to_arr_import_seconds",
-                            "text": "import",
+                            "text": "04 import",
                             "type": "number"
                           },
                           {
                             "selector": "arr_import_to_plex_available_seconds",
-                            "text": "plex",
+                            "text": "05 plex",
                             "type": "number"
                           },
                           {
                             "selector": "plex_available_to_notification_seconds",
-                            "text": "email",
+                            "text": "06 email",
                             "type": "number"
                           }
                         ],
@@ -344,6 +344,78 @@
                       "options": "Type"
                     },
                     "properties": []
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "01 snatch"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "snatch"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "02 download start"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "download start"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "03 download finish"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "download finish"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "04 import"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "import"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "05 plex"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "plex"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "06 email"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "email"
+                      }
+                    ]
                   }
                 ]
               }
