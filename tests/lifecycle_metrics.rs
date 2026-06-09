@@ -79,14 +79,14 @@ async fn request_upsert_reconciles_prior_unmatched_radarr_grab() {
     assert_eq!(
         row.get::<Option<String>, _>("download_started_at")
             .as_deref(),
-        Some("2026-06-02T02:51:26+00:00")
+        None
     );
 
     let metrics = render_metrics(&pool).await.expect("metrics render");
     assert!(
         metrics.contains("media_request_events_total{event_type=\"Grab\",source=\"radarr\"} 1")
     );
-    assert!(metrics.contains("media_request_lifecycle_inflight{stage=\"download_started\"} 0"));
+    assert!(metrics.contains("media_request_lifecycle_inflight{stage=\"download_started\"} 1"));
     assert!(metrics.contains("media_requests_total{media_type=\"movie\"} 1"));
 }
 
@@ -711,7 +711,7 @@ async fn recent_software_delay_rows_use_air_date_for_future_airing_grab_delay() 
 }
 
 #[tokio::test]
-async fn radarr_download_marks_download_finished() {
+async fn radarr_download_marks_import_without_faking_torrent_finish() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
     let pool = connect(&database_url).await.expect("db connect");
@@ -772,10 +772,12 @@ async fn radarr_download_marks_download_finished() {
     let radarr_imported_at = row
         .get::<Option<String>, _>("radarr_imported_at")
         .expect("radarr import timestamp");
-    let download_finished_at = row
-        .get::<Option<String>, _>("download_finished_at")
-        .expect("download finish timestamp");
-    assert_eq!(radarr_imported_at, download_finished_at);
+    assert_eq!(radarr_imported_at, "2026-06-02T04:53:48+00:00");
+    assert_eq!(
+        row.get::<Option<String>, _>("download_finished_at")
+            .as_deref(),
+        None
+    );
 }
 
 #[tokio::test]

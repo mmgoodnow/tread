@@ -732,20 +732,16 @@ fn lifecycle_columns(source: &str, event_type: &str) -> Vec<&'static str> {
         ("tautulli", "recently_added") | ("plex", "recently_added") | (_, "plex_available") => {
             vec!["plex_available_at"]
         }
-        ("sonarr", "grab") | ("sonarr", "episodegrabbed") => {
-            vec!["sonarr_grabbed_at", "download_started_at"]
-        }
+        ("sonarr", "grab") | ("sonarr", "episodegrabbed") => vec!["sonarr_grabbed_at"],
         ("sonarr", "download") | ("sonarr", "import") | ("sonarr", "download_import") => {
-            vec!["sonarr_imported_at", "download_finished_at"]
+            vec!["sonarr_imported_at"]
         }
-        ("radarr", "grab") | ("radarr", "moviegrabbed") => {
-            vec!["radarr_grabbed_at", "download_started_at"]
-        }
+        ("radarr", "grab") | ("radarr", "moviegrabbed") => vec!["radarr_grabbed_at"],
         ("radarr", "download")
         | ("radarr", "import")
         | ("radarr", "download_import")
         | ("radarr", "moviedownloaded") => {
-            vec!["radarr_imported_at", "download_finished_at"]
+            vec!["radarr_imported_at"]
         }
         ("torrent", "download_started") => vec!["download_started_at"],
         ("torrent", "download_finished") => vec!["download_finished_at"],
