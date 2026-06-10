@@ -212,28 +212,23 @@
                             "type": "number"
                           },
                           {
-                            "selector": "arr_grab_to_download_started_seconds",
-                            "text": "02 download start",
-                            "type": "number"
-                          },
-                          {
                             "selector": "download_started_to_download_finished_seconds",
-                            "text": "03 download finish",
+                            "text": "02 download finish",
                             "type": "number"
                           },
                           {
                             "selector": "download_finished_to_arr_import_seconds",
-                            "text": "04 import",
+                            "text": "03 import",
                             "type": "number"
                           },
                           {
                             "selector": "arr_import_to_plex_available_seconds",
-                            "text": "05 plex",
+                            "text": "04 plex",
                             "type": "number"
                           },
                           {
                             "selector": "plex_available_to_notification_seconds",
-                            "text": "06 email",
+                            "text": "05 email",
                             "type": "number"
                           }
                         ],
@@ -360,19 +355,7 @@
                   {
                     "matcher": {
                       "id": "byName",
-                      "options": "02 download start"
-                    },
-                    "properties": [
-                      {
-                        "id": "displayName",
-                        "value": "download start"
-                      }
-                    ]
-                  },
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "03 download finish"
+                      "options": "02 download finish"
                     },
                     "properties": [
                       {
@@ -384,7 +367,7 @@
                   {
                     "matcher": {
                       "id": "byName",
-                      "options": "04 import"
+                      "options": "03 import"
                     },
                     "properties": [
                       {
@@ -396,7 +379,7 @@
                   {
                     "matcher": {
                       "id": "byName",
-                      "options": "05 plex"
+                      "options": "04 plex"
                     },
                     "properties": [
                       {
@@ -408,7 +391,7 @@
                   {
                     "matcher": {
                       "id": "byName",
-                      "options": "06 email"
+                      "options": "05 email"
                     },
                     "properties": [
                       {
@@ -464,11 +447,6 @@
                           {
                             "selector": "request_to_arr_grab_seconds",
                             "text": "snatch",
-                            "type": "number"
-                          },
-                          {
-                            "selector": "arr_grab_to_download_started_seconds",
-                            "text": "download start",
                             "type": "number"
                           },
                           {
@@ -629,46 +607,7 @@
           "data": {
             "kind": "QueryGroup",
             "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "berquo42m4r28a"
-                      },
-                      "spec": {
-                        "expr": "sum by (media_type, download_client) (media_request_to_download_started_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_started_seconds_count{media_type=\"movie\"})",
-                        "legendFormat": "movie request to start"
-                      }
-                    },
-                    "refId": "A",
-                    "hidden": false
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "berquo42m4r28a"
-                      },
-                      "spec": {
-                        "expr": "sum by (source) (media_episode_air_to_download_started_seconds_sum) / sum by (source) (media_episode_air_to_download_started_seconds_count)",
-                        "legendFormat": "series air to start"
-                      }
-                    },
-                    "refId": "B",
-                    "hidden": false
-                  }
-                }
-              ],
+              "queries": [],
               "transformations": [],
               "queryOptions": {}
             }
@@ -943,50 +882,6 @@
                         "name": "berquo42m4r28a"
                       },
                       "spec": {
-                        "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_started_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_started_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download start\", \"media_type\", \".*\")",
-                        "format": "table",
-                        "instant": true,
-                        "interval": "",
-                        "legendFormat": "request -> download start movie {{download_client}}"
-                      }
-                    },
-                    "refId": "B",
-                    "hidden": false
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "berquo42m4r28a"
-                      },
-                      "spec": {
-                        "expr": "label_replace((sum by (source) (media_episode_air_to_download_started_seconds_sum) / sum by (source) (media_episode_air_to_download_started_seconds_count)), \"stage\", \"episode air -> download start\", \"source\", \".*\")",
-                        "format": "table",
-                        "instant": true,
-                        "interval": "",
-                        "legendFormat": "episode air -> download start series {{source}}"
-                      }
-                    },
-                    "refId": "C",
-                    "hidden": false
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "berquo42m4r28a"
-                      },
-                      "spec": {
                         "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_finished_seconds_sum{media_type=\"movie\"}) / sum by (media_type, download_client) (media_request_to_download_finished_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download done\", \"media_type\", \".*\")",
                         "format": "table",
                         "instant": true,
@@ -1104,50 +999,6 @@
                       }
                     },
                     "refId": "A",
-                    "hidden": false
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "berquo42m4r28a"
-                      },
-                      "spec": {
-                        "expr": "label_replace((sum by (media_type, download_client) (media_request_to_download_started_seconds_count{media_type=\"movie\"})), \"stage\", \"request -> download start\", \"media_type\", \".*\")",
-                        "format": "table",
-                        "instant": true,
-                        "interval": "",
-                        "legendFormat": "request -> download start movie {{download_client}}"
-                      }
-                    },
-                    "refId": "B",
-                    "hidden": false
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "berquo42m4r28a"
-                      },
-                      "spec": {
-                        "expr": "label_replace((sum by (source) (media_episode_air_to_download_started_seconds_count)), \"stage\", \"episode air -> download start\", \"source\", \".*\")",
-                        "format": "table",
-                        "instant": true,
-                        "interval": "",
-                        "legendFormat": "episode air -> download start series {{source}}"
-                      }
-                    },
-                    "refId": "C",
                     "hidden": false
                   }
                 },
