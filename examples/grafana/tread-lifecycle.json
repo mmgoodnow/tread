@@ -262,9 +262,9 @@
             "spec": {
               "options": {
                 "barRadius": 0,
-                "barWidth": 0.7,
+                "barWidth": 0.8,
                 "fullHighlight": false,
-                "groupWidth": 0.7,
+                "groupWidth": 0.82,
                 "legend": {
                   "calcs": [],
                   "displayMode": "list",
@@ -273,7 +273,7 @@
                 },
                 "orientation": "horizontal",
                 "showValue": "never",
-                "stacking": "normal",
+                "stacking": "none",
                 "tooltip": {
                   "hideZeros": false,
                   "mode": "multi",
