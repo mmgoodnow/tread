@@ -592,6 +592,7 @@ pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
         EventSource::Radarr => (MediaType::Movie, payload.get("movie").unwrap_or(&payload)),
         _ => (MediaType::Movie, &payload),
     };
+    let (season_number, episode_number) = arr_episode_part(&payload);
 
     let identity = MediaIdentity {
         media_type,
@@ -600,16 +601,8 @@ pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
         imdb_id: text_at(root, &["imdbId"]).or_else(|| text_at(&payload, &["imdbId"])),
         title: text_at(root, &["title"]),
         year: int_at(root, &["year"]),
-        season_number: payload
-            .get("episodes")
-            .and_then(Value::as_array)
-            .and_then(|episodes| episodes.first())
-            .and_then(|episode| int_at(episode, &["seasonNumber"])),
-        episode_number: payload
-            .get("episodes")
-            .and_then(Value::as_array)
-            .and_then(|episodes| episodes.first())
-            .and_then(|episode| int_at(episode, &["episodeNumber"])),
+        season_number,
+        episode_number,
         identifiers: identifiers_from_generic(source, Some(root), &payload),
     };
 
@@ -623,6 +616,27 @@ pub fn arr_event(source: EventSource, payload: Value) -> EventIngest {
         observed_at: arr_observed_at(&payload),
         payload_json: payload,
     }
+}
+
+fn arr_episode_part(payload: &Value) -> (Option<i64>, Option<i64>) {
+    let Some(episodes) = payload.get("episodes").and_then(Value::as_array) else {
+        return (None, None);
+    };
+    let Some(first) = episodes.first() else {
+        return (None, None);
+    };
+
+    let season_number = int_at(first, &["seasonNumber"]);
+    if episodes.len() > 1 {
+        let same_season = episodes
+            .iter()
+            .all(|episode| int_at(episode, &["seasonNumber"]) == season_number);
+        if same_season {
+            return (season_number, None);
+        }
+    }
+
+    (season_number, int_at(first, &["episodeNumber"]))
 }
 
 fn arr_observed_at(payload: &Value) -> chrono::DateTime<Utc> {

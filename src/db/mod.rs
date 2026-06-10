@@ -230,7 +230,55 @@ async fn apply_lifecycle_timestamp(
         .await?;
     }
 
+    if arr_grab_is_rtorrent_download_start(event) {
+        apply_lifecycle_column(
+            pool,
+            outcome.media_request_id,
+            outcome.media_request_item_id,
+            "download_started_at",
+            &event.observed_at.to_rfc3339(),
+            outcome.confidence,
+        )
+        .await?;
+    }
+
     Ok(())
+}
+
+fn arr_grab_is_rtorrent_download_start(event: &EventIngest) -> bool {
+    let is_arr_grab = matches!(
+        event.source,
+        crate::core::model::EventSource::Sonarr | crate::core::model::EventSource::Radarr
+    ) && matches!(
+        event.event_type.to_ascii_lowercase().as_str(),
+        "grab" | "episodegrabbed" | "moviegrabbed"
+    );
+    if !is_arr_grab {
+        return false;
+    }
+
+    let Some(download_client) = event
+        .payload_json
+        .get("downloadClient")
+        .or_else(|| event.payload_json.get("download_client"))
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    if !download_client.eq_ignore_ascii_case("rtorrent") {
+        return false;
+    }
+
+    event
+        .payload_json
+        .get("downloadId")
+        .or_else(|| event.payload_json.get("download_id"))
+        .and_then(Value::as_str)
+        .is_some_and(is_info_hash)
+}
+
+fn is_info_hash(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 async fn update_request_identity_from_event(

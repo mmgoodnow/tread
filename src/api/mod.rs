@@ -217,11 +217,6 @@ pub async fn recent_software_delay_rows_with_options(
                  AND download_finished_at IS NOT NULL
                  AND julianday(download_finished_at) >= julianday(download_started_at)
                 THEN (julianday(download_finished_at) - julianday(download_started_at)) * 86400.0
-                WHEN download_started_at IS NULL
-                 AND arr_grabbed_at IS NOT NULL
-                 AND download_finished_at IS NOT NULL
-                 AND julianday(download_finished_at) >= julianday(arr_grabbed_at)
-                THEN (julianday(download_finished_at) - julianday(arr_grabbed_at)) * 86400.0
             END AS download_started_to_download_finished_seconds,
             CASE
                 WHEN download_finished_at IS NOT NULL

@@ -571,7 +571,7 @@ async fn recent_software_delay_rows_can_filter_empty_chart_rows() {
 }
 
 #[tokio::test]
-async fn recent_software_delay_rows_show_finish_duration_when_start_is_missing() {
+async fn recent_software_delay_rows_do_not_invent_finish_duration_when_start_is_missing() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
     let pool = connect(&database_url).await.expect("db connect");
@@ -630,10 +630,7 @@ async fn recent_software_delay_rows_show_finish_duration_when_start_is_missing()
 
     assert_eq!(row.request_to_arr_grab_seconds, Some(23.0));
     assert_eq!(row.arr_grab_to_download_started_seconds, None);
-    assert_eq!(
-        row.download_started_to_download_finished_seconds,
-        Some(5965.0)
-    );
+    assert_eq!(row.download_started_to_download_finished_seconds, None);
     assert!(row.missing_stages.contains(&"download_started"));
 }
 
@@ -1279,6 +1276,9 @@ async fn rtorrent_season_pack_finish_matches_sonarr_grab_info_hash() {
                 "episodes": [{
                     "seasonNumber": 1,
                     "episodeNumber": 1
+                }, {
+                    "seasonNumber": 1,
+                    "episodeNumber": 2
                 }],
                 "release": {
                     "releaseTitle": "Murderbot.S01.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-RAWR"
@@ -1289,6 +1289,34 @@ async fn rtorrent_season_pack_finish_matches_sonarr_grab_info_hash() {
     )
     .await
     .expect("sonarr grab ingest");
+
+    let start_row = sqlx::query(
+        r#"
+        SELECT mri.download_started_at, mri.sonarr_grabbed_at, mri.season_number, mri.episode_number
+        FROM media_request_items mri
+        WHERE mri.media_request_id = (
+            SELECT id FROM media_requests WHERE overseerr_request_id = 554
+        )
+          AND mri.season_number = 1
+          AND mri.episode_number IS NULL
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("season start row");
+
+    assert_eq!(
+        start_row
+            .get::<Option<String>, _>("download_started_at")
+            .as_deref(),
+        Some("2026-06-09T05:38:32+00:00")
+    );
+    assert_eq!(
+        start_row
+            .get::<Option<String>, _>("sonarr_grabbed_at")
+            .as_deref(),
+        Some("2026-06-09T05:38:32+00:00")
+    );
 
     let outcome = ingest_event(
         &pool,
