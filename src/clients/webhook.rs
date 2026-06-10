@@ -321,11 +321,21 @@ fn identifiers_from_generic(
             if let Some(root) = arr_root {
                 push_identifier(&mut identifiers, "sonarr_series_id", int_at(root, &["id"]));
             }
+            push_identifier(
+                &mut identifiers,
+                "torrent_info_hash",
+                text_at(payload, &["downloadId"]),
+            );
         }
         EventSource::Radarr => {
             if let Some(root) = arr_root {
                 push_identifier(&mut identifiers, "radarr_movie_id", int_at(root, &["id"]));
             }
+            push_identifier(
+                &mut identifiers,
+                "torrent_info_hash",
+                text_at(payload, &["downloadId"]),
+            );
         }
         EventSource::Plex => {
             push_plex_identifiers(&mut identifiers, payload, "media_type");
@@ -483,6 +493,7 @@ pub fn rtorrent_event(mut payload: Value) -> EventIngest {
         .or_else(|| text_at(&payload, &["base_path"]).and_then(|path| raw_basename(&path)));
     let title = raw_name.as_deref().map(clean_title);
     let media_type = text_at(&payload, &["media_type"])
+        .or_else(|| media_type_from_rtorrent_label(&payload).map(str::to_string))
         .or_else(|| {
             raw_name
                 .as_deref()
@@ -503,7 +514,7 @@ pub fn rtorrent_event(mut payload: Value) -> EventIngest {
         episode_number: int_at(&payload, &["episode_number"])
             .or_else(|| int_at(&payload, &["episodeNumber"]))
             .or_else(|| raw_name.as_deref().and_then(infer_episode_number)),
-        identifiers: Vec::new(),
+        identifiers: rtorrent_identifiers(&payload),
     });
     let external_id = text_at(&payload, &["external_id"]).or_else(|| {
         text_at(&payload, &["info_hash"])
@@ -690,24 +701,42 @@ fn clean_title(name: &str) -> String {
 
     if let Some(episode_index) = parts.iter().position(|part| {
         let lower = part.to_ascii_lowercase();
-        let bytes = lower.as_bytes();
-        bytes.len() == 6
-            && bytes[0] == b's'
-            && bytes[1].is_ascii_digit()
-            && bytes[2].is_ascii_digit()
-            && bytes[3] == b'e'
-            && bytes[4].is_ascii_digit()
-            && bytes[5].is_ascii_digit()
+        is_season_episode_token(&lower)
     }) {
         return parts[..episode_index].join(" ");
+    }
+
+    if let Some(season_index) = parts.iter().position(|part| {
+        let lower = part.to_ascii_lowercase();
+        is_season_pack_token(&lower)
+    }) {
+        return parts[..season_index].join(" ");
     }
 
     normalized
 }
 
+fn media_type_from_rtorrent_label(payload: &Value) -> Option<&'static str> {
+    match text_at(payload, &["label"])?.to_ascii_lowercase().as_str() {
+        "sonarr" => Some("series"),
+        "radarr" => Some("movie"),
+        _ => None,
+    }
+}
+
+fn rtorrent_identifiers(payload: &Value) -> Vec<MediaIdentifier> {
+    let mut identifiers = Vec::new();
+    push_identifier(
+        &mut identifiers,
+        "torrent_info_hash",
+        text_at(payload, &["info_hash"]).or_else(|| text_at(payload, &["infoHash"])),
+    );
+    identifiers
+}
+
 fn infer_media_type(title: &str) -> Option<&'static str> {
     let lower = title.to_ascii_lowercase();
-    if infer_season_number(&lower).is_some() && infer_episode_number(&lower).is_some() {
+    if infer_season_number(&lower).is_some() {
         return Some("series");
     }
     infer_year(title).map(|_| "movie")
@@ -725,7 +754,9 @@ fn infer_year(title: &str) -> Option<i64> {
 }
 
 fn infer_season_number(title: &str) -> Option<i64> {
-    infer_episode_parts(title).map(|(season, _)| season)
+    infer_episode_parts(title)
+        .map(|(season, _)| season)
+        .or_else(|| infer_season_pack_number(title))
 }
 
 fn infer_episode_number(title: &str) -> Option<i64> {
@@ -749,6 +780,33 @@ fn infer_episode_parts(title: &str) -> Option<(i64, i64)> {
         }
     }
     None
+}
+
+fn infer_season_pack_number(title: &str) -> Option<i64> {
+    title
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .find_map(|part| {
+            let lower = part.to_ascii_lowercase();
+            is_season_pack_token(&lower)
+                .then(|| lower[1..].parse::<i64>().ok())
+                .flatten()
+        })
+}
+
+fn is_season_episode_token(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 6
+        && bytes[0] == b's'
+        && bytes[1].is_ascii_digit()
+        && bytes[2].is_ascii_digit()
+        && bytes[3] == b'e'
+        && bytes[4].is_ascii_digit()
+        && bytes[5].is_ascii_digit()
+}
+
+fn is_season_pack_token(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 3 && bytes[0] == b's' && bytes[1].is_ascii_digit() && bytes[2].is_ascii_digit()
 }
 
 fn event_observed_at(

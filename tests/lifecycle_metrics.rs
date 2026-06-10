@@ -571,6 +571,73 @@ async fn recent_software_delay_rows_can_filter_empty_chart_rows() {
 }
 
 #[tokio::test]
+async fn recent_software_delay_rows_show_finish_duration_when_start_is_missing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(553),
+            identity: MediaIdentity {
+                media_type: MediaType::Movie,
+                tmdb_id: Some(1186563),
+                tvdb_id: None,
+                imdb_id: None,
+                title: Some("The Friend".to_string()),
+                year: Some(2025),
+                season_number: None,
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: None,
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Existing,
+            }],
+            title: "The Friend".to_string(),
+            requested_by: None,
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 9, 5, 38, 4).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    sqlx::query(
+        r#"
+        UPDATE media_request_items
+        SET radarr_grabbed_at = '2026-06-09T05:38:27+00:00',
+            download_finished_at = '2026-06-09T07:17:52+00:00'
+        WHERE media_request_id = (SELECT id FROM media_requests WHERE overseerr_request_id = 553)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("item update");
+
+    let rows = tread::api::recent_software_delay_rows_with_options(
+        &pool,
+        10,
+        true,
+        tread::api::RecentSoftwareDelaySort::Recent,
+    )
+    .await
+    .expect("delay rows");
+    let row = rows.first().expect("delay row");
+
+    assert_eq!(row.request_to_arr_grab_seconds, Some(23.0));
+    assert_eq!(row.arr_grab_to_download_started_seconds, None);
+    assert_eq!(
+        row.download_started_to_download_finished_seconds,
+        Some(5965.0)
+    );
+    assert!(row.missing_stages.contains(&"download_started"));
+}
+
+#[tokio::test]
 async fn recent_software_delay_rows_can_sort_by_total_delay_desc() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
@@ -1155,6 +1222,108 @@ async fn rtorrent_form_hook_marks_download_finished_by_title_fallback() {
     assert!(metrics.contains(
         "media_request_to_download_finished_seconds_sum{download_client=\"rtorrent\",media_type=\"movie\"} 527"
     ));
+}
+
+#[tokio::test]
+async fn rtorrent_season_pack_finish_matches_sonarr_grab_info_hash() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database_url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
+    let pool = connect(&database_url).await.expect("db connect");
+
+    upsert_media_request(
+        &pool,
+        IncomingRequest {
+            overseerr_request_id: Some(554),
+            identity: MediaIdentity {
+                media_type: MediaType::Series,
+                tmdb_id: Some(241554),
+                tvdb_id: Some(443396),
+                imdb_id: Some("tt30444310".to_string()),
+                title: Some("Murderbot".to_string()),
+                year: Some(2025),
+                season_number: Some(1),
+                episode_number: None,
+                identifiers: Vec::new(),
+            },
+            items: vec![MediaRequestItemInput {
+                season_number: Some(1),
+                episode_number: None,
+                title: None,
+                air_date: None,
+                availability_class: AvailabilityClass::Unknown,
+            }],
+            title: "Murderbot".to_string(),
+            requested_by: Some("user".to_string()),
+            requested_at: Utc.with_ymd_and_hms(2026, 6, 9, 5, 38, 4).unwrap(),
+        },
+    )
+    .await
+    .expect("request insert");
+
+    ingest_event(
+        &pool,
+        arr_event(
+            EventSource::Sonarr,
+            json!({
+                "eventType": "Grab",
+                "downloadId": "CC86696B4ADA2CFF8F9673EB2B5DDCA9DEE24685",
+                "downloadClient": "rTorrent",
+                "series": {
+                    "title": "Murderbot",
+                    "tvdbId": 443396,
+                    "tmdbId": 241554,
+                    "imdbId": "tt30444310",
+                    "year": 2025,
+                    "type": "standard"
+                },
+                "episodes": [{
+                    "seasonNumber": 1,
+                    "episodeNumber": 1
+                }],
+                "release": {
+                    "releaseTitle": "Murderbot.S01.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-RAWR"
+                },
+                "observed_at": "2026-06-09T05:38:32Z"
+            }),
+        ),
+    )
+    .await
+    .expect("sonarr grab ingest");
+
+    let outcome = ingest_event(
+        &pool,
+        rtorrent_event(json!({
+            "event_type": "download_finished",
+            "info_hash": "CC86696B4ADA2CFF8F9673EB2B5DDCA9DEE24685",
+            "base_path": "/media/MediaStorage/Raw/Sonarr/Murderbot.S01.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-RAWR",
+            "label": "Sonarr",
+            "complete": "1",
+            "observed_at": "2026-06-09T06:09:52Z"
+        })),
+    )
+    .await
+    .expect("rtorrent event ingest")
+    .expect("rtorrent event should match");
+
+    let row = sqlx::query(
+        r#"
+        SELECT mri.download_finished_at, mri.season_number, mri.episode_number
+        FROM media_request_items mri
+        WHERE mri.id = ?
+        "#,
+    )
+    .bind(outcome.media_request_item_id)
+    .fetch_one(&pool)
+    .await
+    .expect("item row");
+
+    assert_eq!(row.get::<Option<i64>, _>("season_number"), Some(1));
+    assert_eq!(row.get::<Option<i64>, _>("episode_number"), None);
+    assert_eq!(
+        row.get::<Option<String>, _>("download_finished_at")
+            .as_deref(),
+        Some("2026-06-09T06:09:52+00:00")
+    );
 }
 
 #[tokio::test]
