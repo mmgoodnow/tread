@@ -158,7 +158,20 @@ pub async fn recent_software_delay_rows_with_options(
                 COALESCE(mri.radarr_grabbed_at, mri.sonarr_grabbed_at) AS arr_grabbed_at,
                 mri.download_started_at,
                 mri.download_finished_at,
-                COALESCE(mri.radarr_imported_at, mri.sonarr_imported_at) AS arr_imported_at,
+                COALESCE(
+                    mri.radarr_imported_at,
+                    mri.sonarr_imported_at,
+                    (
+                        SELECT MAX(COALESCE(child.radarr_imported_at, child.sonarr_imported_at))
+                        FROM media_request_items child
+                        WHERE child.media_request_id = mri.media_request_id
+                          AND child.episode_number IS NOT NULL
+                          AND (
+                            (mri.season_number IS NULL AND child.season_number IS NOT NULL)
+                            OR child.season_number = mri.season_number
+                          )
+                    )
+                ) AS arr_imported_at,
                 mri.plex_available_at,
                 mri.overseerr_notification_sent_at AS notification_sent_at
             FROM media_request_items mri

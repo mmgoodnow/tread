@@ -1352,6 +1352,39 @@ async fn rtorrent_season_pack_finish_matches_sonarr_grab_info_hash() {
             .as_deref(),
         Some("2026-06-09T06:09:52+00:00")
     );
+
+    sqlx::query(
+        r#"
+        INSERT INTO media_request_items (
+            media_request_id, media_type, season_number, episode_number, requested_at,
+            availability_class, sonarr_imported_at
+        )
+        SELECT id, 'series', 1, 1, requested_at, 'existing', '2026-06-09T06:10:06+00:00'
+        FROM media_requests
+        WHERE overseerr_request_id = 554
+        UNION ALL
+        SELECT id, 'series', 1, 2, requested_at, 'existing', '2026-06-09T06:10:08+00:00'
+        FROM media_requests
+        WHERE overseerr_request_id = 554
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("child imports update");
+
+    let rows = tread::api::recent_software_delay_rows(&pool, 10)
+        .await
+        .expect("delay rows");
+    let row = rows
+        .iter()
+        .find(|row| row.display_title == "Murderbot S01")
+        .expect("season delay row");
+
+    assert_eq!(
+        row.download_started_to_download_finished_seconds,
+        Some(1880.0)
+    );
+    assert_eq!(row.download_finished_to_arr_import_seconds, Some(16.0));
 }
 
 #[tokio::test]
