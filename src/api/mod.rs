@@ -176,6 +176,9 @@ pub async fn recent_software_delay_rows_with_options(
               AND NOT (
                 mri.season_number IS NULL
                 AND mri.episode_number IS NULL
+                AND mri.sonarr_grabbed_at IS NULL
+                AND mri.radarr_grabbed_at IS NULL
+                AND mri.download_started_at IS NULL
                 AND EXISTS (
                     SELECT 1
                     FROM media_request_items child
