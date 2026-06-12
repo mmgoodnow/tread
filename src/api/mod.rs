@@ -77,6 +77,7 @@ pub struct RecentSoftwareDelayRow {
     pub media_type: String,
     pub title: String,
     pub display_title: String,
+    pub display_label: String,
     pub season_number: Option<i64>,
     pub episode_number: Option<i64>,
     pub requested_at: String,
@@ -337,13 +338,16 @@ pub async fn recent_software_delay_rows_with_options(
             let title: String = row.get("title");
             let season_number = row.get("season_number");
             let episode_number = row.get("episode_number");
+            let display_title = software_delay_display_title(&title, season_number, episode_number);
+            let overseerr_request_id = row.get("overseerr_request_id");
 
             RecentSoftwareDelayRow {
                 item_id: row.get("item_id"),
                 media_request_id: row.get("media_request_id"),
-                overseerr_request_id: row.get("overseerr_request_id"),
+                overseerr_request_id,
                 media_type: row.get("media_type"),
-                display_title: software_delay_display_title(&title, season_number, episode_number),
+                display_label: software_delay_display_label(&display_title, overseerr_request_id),
+                display_title,
                 title,
                 season_number,
                 episode_number,
@@ -383,6 +387,13 @@ fn software_delay_display_title(
         (Some(season), Some(episode)) => format!("{title} S{season:02}E{episode:02}"),
         (Some(season), None) => format!("{title} S{season:02}"),
         _ => title.to_string(),
+    }
+}
+
+fn software_delay_display_label(title: &str, overseerr_request_id: Option<i64>) -> String {
+    match overseerr_request_id {
+        Some(request_id) => format!("{title} #{request_id}"),
+        None => title.to_string(),
     }
 }
 
